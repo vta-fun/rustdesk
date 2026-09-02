@@ -765,12 +765,37 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
     ];
   }
 
+  List<TTextMenu> _getKeyboardModeMenus() {
+    if (!isAndroid ||
+        !gFFI.ffiModel.keyboard ||
+        gFFI.ffiModel.pi.platform == kPeerPlatformAndroid) {
+      return [];
+    }
+    final supportedModes = [
+      kKeyLegacyMode,
+      kKeyMapMode,
+      kKeyTranslateMode,
+    ]
+        .where((mode) => bind.sessionIsKeyboardModeSupported(
+            sessionId: sessionId, mode: mode))
+        .toList();
+    if (supportedModes.length < 2) {
+      return [];
+    }
+    return [
+      TTextMenu(
+        child: Text(translate('Keyboard Settings')),
+        onPressed: changeKeyboardMode,
+      ),
+    ];
+  }
+
   void showActions(String id) async {
     final size = MediaQuery.of(context).size;
     final x = 120.0;
     final y = size.height;
     final mobileActionMenus = _getMobileActionMenus();
-    final menus = toolbarControls(context, id, gFFI);
+    final menus = _getKeyboardModeMenus() + toolbarControls(context, id, gFFI);
 
     final List<PopupMenuEntry<int>> more = [
       ...mobileActionMenus
@@ -895,24 +920,48 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
             )));
   }
 
-  // * Currently mobile does not enable map mode
-  // void changePhysicalKeyboardInputMode() async {
-  //   var current = await bind.sessionGetKeyboardMode(id: widget.id) ?? "legacy";
-  //   gFFI.dialogManager.show((setState, close) {
-  //     void setMode(String? v) async {
-  //       await bind.sessionSetKeyboardMode(id: widget.id, value: v ?? "");
-  //       setState(() => current = v ?? '');
-  //       Future.delayed(Duration(milliseconds: 300), close);
-  //     }
-  //
-  //     return CustomAlertDialog(
-  //         title: Text(translate('Physical Keyboard Input Mode')),
-  //         content: Column(mainAxisSize: MainAxisSize.min, children: [
-  //           getRadio('Legacy mode', 'legacy', current, setMode),
-  //           getRadio('Map mode', 'map', current, setMode),
-  //         ]));
-  //   }, clickMaskDismiss: true);
-  // }
+  void changeKeyboardMode() async {
+    final modes = [
+      (kKeyLegacyMode, 'Legacy mode'),
+      (kKeyMapMode, 'Map mode'),
+      (kKeyTranslateMode, 'Translate mode'),
+    ]
+        .where((mode) => bind.sessionIsKeyboardModeSupported(
+            sessionId: sessionId, mode: mode.$1))
+        .toList();
+    var current =
+        await bind.sessionGetKeyboardMode(sessionId: sessionId) ??
+            kKeyLegacyMode;
+    if (!mounted) return;
+
+    gFFI.dialogManager.show((setState, close) {
+      void setMode(String? value) async {
+        if (value == null) return;
+        await bind.sessionSetKeyboardMode(
+            sessionId: sessionId, value: value);
+        await inputModel.updateKeyboardMode();
+        setState(() => current = value);
+        Future.delayed(const Duration(milliseconds: 300), close);
+      }
+
+      return CustomAlertDialog(
+        title: Text(translate('Keyboard Settings')),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: modes
+              .map((mode) => getRadio<String>(
+                    Text(translate(mode.$2)),
+                    mode.$1,
+                    current,
+                    setMode,
+                  ))
+              .toList(),
+        ),
+      );
+    }, clickMaskDismiss: true, backDismiss: true).then((_) {
+      _disableAndroidSoftKeyboard();
+    });
+  }
 }
 
 class KeyHelpTools extends StatefulWidget {

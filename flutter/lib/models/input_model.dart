@@ -589,8 +589,7 @@ class InputModel {
   // This function must be called after the peer info is received.
   // Because `sessionGetKeyboardMode` relies on the peer version.
   updateKeyboardMode() async {
-    // * Currently mobile does not enable map mode
-    if (isDesktop || isWebDesktop) {
+    if (isDesktop || isWebDesktop || isMobile) {
       keyboardMode = await bind.sessionGetKeyboardMode(sessionId: sessionId) ??
           kKeyLegacyMode;
     }
@@ -861,13 +860,13 @@ class InputModel {
       handleKeyDownEventModifiers(e);
     }
 
-    bool isMobileAndMapMode = false;
+    bool isMobileAndNewKeyboardMode = false;
     if (isMobile) {
-      // Do not use map mode if mobile -> Android. Android does not support map mode for now.
+      // Do not use the new keyboard modes if mobile -> Android. Android does not support map mode for now.
       // Because simulating the physical key events(uhid) which requires root permission is not supported.
       if (peerPlatform != kPeerPlatformAndroid) {
         if (isIOS) {
-          isMobileAndMapMode = true;
+          isMobileAndNewKeyboardMode = true;
         } else {
           // The physicalKey.usbHidUsage may be not correct for soft keyboard on Android.
           // iOS does not have this issue.
@@ -885,7 +884,9 @@ class InputModel {
           // The normal `usbHidUsage` for keyboard shoud be between [0x00000010, 0x000c029f]
           // https://github.com/flutter/flutter/blob/c051b69e2a2224300e20d93dbd15f4b91e8844d1/packages/flutter/lib/src/services/keyboard_key.g.dart#L5332 - 5600
           final isNormalHsbHidUsage = (e.physicalKey.usbHidUsage >> 20) == 0;
-          isMobileAndMapMode = isNormalHsbHidUsage &&
+          isMobileAndNewKeyboardMode =
+              [kKeyMapMode, kKeyTranslateMode].contains(keyboardMode) &&
+              isNormalHsbHidUsage &&
               // No need to check `!['Backspace', 'Enter'].contains(e.logicalKey.keyLabel)`
               // But we still add it for more reliability.
               !['Backspace', 'Enter'].contains(e.logicalKey.keyLabel);
@@ -909,7 +910,7 @@ class InputModel {
 
     final isDesktopAndMapMode =
         isDesktop || (isWebDesktop && keyboardMode == kKeyMapMode);
-    if (isMobileAndMapMode || isDesktopAndMapMode) {
+    if (isMobileAndNewKeyboardMode || isDesktopAndMapMode) {
       // FIXME: e.character is wrong for dead keys, eg: ^ in de
       newKeyboardMode(
           e.character ?? '',
