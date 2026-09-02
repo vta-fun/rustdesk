@@ -934,7 +934,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
             kKeyLegacyMode;
     if (!mounted) return;
 
-    gFFI.dialogManager.show((setState, close) {
+    gFFI.dialogManager.show((setState, close, _) {
       void setMode(String? value) async {
         if (value == null) return;
         await bind.sessionSetKeyboardMode(
