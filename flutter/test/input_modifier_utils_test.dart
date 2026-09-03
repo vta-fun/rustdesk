@@ -3,6 +3,36 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_hbb/models/input_modifier_utils.dart';
 
 void main() {
+  group('softKeyboardTextDelta', () {
+    test('replaces same-length Android IME composing text', () {
+      final delta = softKeyboardTextDelta('ohayo', 'おはよう');
+
+      expect(delta.deleteCount, 5);
+      expect(delta.insertText, 'おはよう');
+    });
+
+    test('keeps the unchanged hidden-buffer prefix', () {
+      final delta = softKeyboardTextDelta('111おhayo', '111おはよう');
+
+      expect(delta.deleteCount, 4);
+      expect(delta.insertText, 'はよう');
+    });
+
+    test('counts one visible grapheme as one deletion', () {
+      final delta = softKeyboardTextDelta('hello👍🏽', 'hello😊');
+
+      expect(delta.deleteCount, 1);
+      expect(delta.insertText, '😊');
+    });
+
+    test('appends committed text without deleting the prefix', () {
+      final delta = softKeyboardTextDelta('111', '111おはよう');
+
+      expect(delta.deleteCount, 0);
+      expect(delta.insertText, 'おはよう');
+    });
+  });
+
   group('shouldReleaseStaleMobileShift', () {
     test('does not release when cached shift is already false', () {
       expect(

@@ -8,6 +8,43 @@ enum TerminalInputSource {
   paste,
 }
 
+/// Describes how to mirror a hidden soft-keyboard text buffer to the peer.
+class SoftKeyboardTextDelta {
+  const SoftKeyboardTextDelta({
+    required this.deleteCount,
+    required this.insertText,
+  });
+
+  /// Number of trailing grapheme clusters to delete from the peer.
+  final int deleteCount;
+
+  /// Replacement text to append after deleting the changed suffix.
+  final String insertText;
+}
+
+/// Computes a suffix replacement between two soft-keyboard buffer values.
+///
+/// Android IMEs rewrite the active composing range in place (for example,
+/// `ohayo` becomes `おはよう`). Comparing only the string lengths misses those
+/// rewrites. Grapheme clusters are used so one visible emoji or combined
+/// character produces one Backspace on the peer.
+SoftKeyboardTextDelta softKeyboardTextDelta(String oldValue, String newValue) {
+  final oldGraphemes = oldValue.characters.toList(growable: false);
+  final newGraphemes = newValue.characters.toList(growable: false);
+  var commonPrefixLength = 0;
+  while (commonPrefixLength < oldGraphemes.length &&
+      commonPrefixLength < newGraphemes.length &&
+      oldGraphemes[commonPrefixLength] ==
+          newGraphemes[commonPrefixLength]) {
+    commonPrefixLength++;
+  }
+
+  return SoftKeyboardTextDelta(
+    deleteCount: oldGraphemes.length - commonPrefixLength,
+    insertText: newGraphemes.skip(commonPrefixLength).join(),
+  );
+}
+
 /// Returns true when a stale mobile one-shot Shift state should be released
 /// by replaying a tracked Shift key-down as a synthesized key-up.
 ///

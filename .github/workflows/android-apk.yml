@@ -100,6 +100,10 @@ jobs:
             git apply "${{ github.workspace }}/.github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff"
           fi
 
+      - name: Test soft keyboard text handling
+        working-directory: flutter
+        run: flutter test test/input_modifier_utils_test.dart
+
       - name: Install Android NDK
         uses: nttld/setup-ndk@ed92fe6cadad69be94a966a7ee3271275e62f779 # v1
         id: setup-ndk

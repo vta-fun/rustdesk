@@ -18,6 +18,7 @@ import '../../common.dart';
 import '../../common/widgets/overlay.dart';
 import '../../common/widgets/dialog.dart';
 import '../../common/widgets/remote_input.dart';
+import '../../models/input_modifier_utils.dart';
 import '../../models/input_model.dart';
 import '../../models/model.dart';
 import '../../models/platform_model.dart';
@@ -335,33 +336,50 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
       // clipboard
       oldValue = '';
     }
-    if (newValue.length == oldValue.length) {
-      // ?
-    } else if (newValue.length < oldValue.length) {
-      final char = 'VK_BACK';
-      inputModel.inputKey(char);
-    } else {
-      final content = newValue.substring(oldValue.length);
-      if (content.length > 1) {
-        if (oldValue != '' &&
-            content.length == 2 &&
-            (content == '""' ||
-                content == '()' ||
-                content == '[]' ||
-                content == '<>' ||
-                content == "{}" ||
-                content == '”“' ||
-                content == '《》' ||
-                content == '（）' ||
-                content == '【】')) {
-          // can not only input content[0], because when input ], [ are also auo insert, which cause ] never be input
-          bind.sessionInputString(sessionId: sessionId, value: content);
-          _openKeyboardUnlocked();
-          return;
+    final delta = softKeyboardTextDelta(oldValue, newValue);
+    for (var i = 0; i < delta.deleteCount; i++) {
+      inputModel.inputKey('VK_BACK');
+    }
+    if (delta.insertText.isEmpty) {
+      return;
+    }
+
+    final shouldResetAutoPair = oldValue.isNotEmpty &&
+        delta.deleteCount == 0 &&
+        const {
+          '""',
+          '()',
+          '[]',
+          '<>',
+          '{}',
+          '”“',
+          '《》',
+          '（）',
+          '【】',
+        }.contains(delta.insertText);
+
+    _inputSoftKeyboardText(delta.insertText);
+    if (shouldResetAutoPair) {
+      // Reset the hidden buffer after IMEs insert both sides of an auto-pair.
+      _openKeyboardUnlocked();
+    }
+  }
+
+  void _inputSoftKeyboardText(String text) {
+    final parts = text.split('\n');
+    for (var i = 0; i < parts.length; i++) {
+      final part = parts[i];
+      if (part.isNotEmpty) {
+        final hasShortcutModifier =
+            inputModel.ctrl || inputModel.alt || inputModel.command;
+        if (hasShortcutModifier && part.characters.length == 1) {
+          inputChar(part);
+        } else {
+          bind.sessionInputString(sessionId: sessionId, value: part);
         }
-        bind.sessionInputString(sessionId: sessionId, value: content);
-      } else {
-        inputChar(content);
+      }
+      if (i < parts.length - 1) {
+        inputModel.inputKey('VK_RETURN');
       }
     }
   }
