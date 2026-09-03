@@ -17,6 +17,7 @@ env:
   VCPKG_COMMIT_ID: "9e593bb18ea69cc5095e012465dcd675a822ed0d"
   VERSION: "1.5.0"
   NDK_VERSION: "r28c"
+  ANDROID_SIGNING_KEY: "${{ secrets.ANDROID_SIGNING_KEY }}"
 
 jobs:
   generate-bridge:
@@ -165,12 +166,46 @@ jobs:
           pushd flutter
           flutter build apk --release --target-platform android-arm64 --split-per-abi
           popd
-          mv ./flutter/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk ./rustdesk-keyboard-mode-arm64.apk
+          mkdir -p signed-apk
+          mv ./flutter/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk ./signed-apk/rustdesk-japanese-ime-arm64.apk
 
-      - name: Upload APK
+      - name: Sign APK with the fixed release key
+        if: env.ANDROID_SIGNING_KEY != ''
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_SIGNING_KEY }}
+          KEY_ALIAS: ${{ secrets.ANDROID_ALIAS }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEY_STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          APK_PATH="${GITHUB_WORKSPACE}/signed-apk/rustdesk-japanese-ime-arm64.apk"
+          KEYSTORE_PATH="${RUNNER_TEMP}/rustdesk-vta-release.jks"
+          BUILD_TOOLS_DIR=$(find "${ANDROID_SDK_ROOT}/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
+          trap 'rm -f "${KEYSTORE_PATH}"' EXIT
+          printf '%s' "${KEYSTORE_BASE64}" | base64 --decode > "${KEYSTORE_PATH}"
+          "${BUILD_TOOLS_DIR}/apksigner" sign \
+            --ks "${KEYSTORE_PATH}" \
+            --ks-key-alias "${KEY_ALIAS}" \
+            --ks-pass env:KEYSTORE_PASSWORD \
+            --key-pass env:KEY_PASSWORD \
+            "${APK_PATH}"
+          "${BUILD_TOOLS_DIR}/apksigner" verify --verbose --print-certs "${APK_PATH}"
+
+      - name: Upload signed APK
+        if: env.ANDROID_SIGNING_KEY != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: rustdesk-keyboard-mode-arm64-${{ github.run_number }}
-          path: rustdesk-keyboard-mode-arm64.apk
+          name: rustdesk-japanese-ime-arm64-${{ github.run_number }}
+          path: signed-apk/rustdesk-japanese-ime-arm64.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload debug-signed APK fallback
+        if: env.ANDROID_SIGNING_KEY == ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rustdesk-japanese-ime-arm64-${{ github.run_number }}
+          path: signed-apk/rustdesk-japanese-ime-arm64.apk
           if-no-files-found: error
           retention-days: 14
