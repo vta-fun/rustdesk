@@ -1,0 +1,88 @@
+name: RustDesk 1.5.1 Morphe settings payload
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/morphe-backup-settings]
+    paths:
+      - .github/workflows/morphe-settings-payload.yml
+      - flutter/lib/mobile/pages/settings_page.dart
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  build-flutter:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [backup, keyboard-and-backup]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Keep the original keyboard for the backup-only variant
+        if: matrix.variant == 'backup'
+        run: |
+          git restore --source=23e5bb471a040d62f0a6ad52591fb30784265b73 -- \
+            flutter/lib/mobile/pages/remote_page.dart flutter/lib/models/input_model.dart \
+            flutter/lib/models/input_modifier_utils.dart flutter/lib/models/model.dart
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          channel: stable
+          flutter-version: '3.24.5'
+
+      - name: Apply the RustDesk Flutter SDK patch
+        run: |
+          sdk_root="$(dirname "$(dirname "$(command -v flutter)")")"
+          git -C "$sdk_root" apply "$GITHUB_WORKSPACE/.github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff"
+
+      - uses: nttld/setup-ndk@ed92fe6cadad69be94a966a7ee3271275e62f779
+        id: setup-ndk
+        with:
+          ndk-version: r28c
+
+      - name: Restore the 1.5.1 Dart/Rust bridge
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: bridge-artifact
+          github-token: ${{ github.token }}
+          run-id: '42124860635'
+
+      - name: Restore the built 1.5.1 Rust library
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: rustdesk-1.5.1-morphe-payload-arm64
+          github-token: ${{ github.token }}
+          run-id: '42126226934'
+          path: native-payload
+
+      - name: Build the settings payload
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          export JAVA_HOME="$JAVA_HOME_17_X64"
+          export PATH="$JAVA_HOME/bin:$PATH"
+          mkdir -p flutter/android/app/src/main/jniLibs
+          unzip -q native-payload/app-arm64-v8a-release.apk \
+            'lib/arm64-v8a/libc++_shared.so' 'lib/arm64-v8a/librustdesk.so' -d native-payload
+          mv native-payload/lib/arm64-v8a flutter/android/app/src/main/jniLibs/
+          sed -i 's/org.gradle.jvmargs=-Xmx1024M/org.gradle.jvmargs=-Xmx2g/g' flutter/android/gradle.properties
+          sed -i 's/signingConfigs.release/signingConfigs.debug/g' flutter/android/app/build.gradle
+          cd flutter
+          flutter build apk --release --target-platform android-arm64 --split-per-abi
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: rustdesk-1.5.1-morphe-${{ matrix.variant }}-arm64
+          path: flutter/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          if-no-files-found: error
+          retention-days: 14

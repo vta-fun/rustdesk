@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show MissingPluginException;
 import 'package:flutter_hbb/common/widgets/setting_widgets.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_setting_page.dart';
 import 'package:get/get.dart';
@@ -108,6 +109,19 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
   var _isUsingPublicServer = false;
   var _allowAskForNoteAtEndOfConnection = false;
   var _preventSleepWhileConnected = true;
+  var _hasConnectionBackup = false;
+
+  Future<void> _checkConnectionBackup() async {
+    try {
+      final available = await gFFI.invokeMethodWithResult<bool>(
+          'rustdesk_connection_backup', false);
+      if (mounted && available == true) {
+        setState(() => _hasConnectionBackup = true);
+      }
+    } on MissingPluginException {
+      // Only APKs with the backup patch implement this method.
+    }
+  }
 
   _SettingsState() {
     _enableAbr = option2bool(
@@ -161,6 +175,9 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    if (isAndroid && !bind.isDisableSettings()) {
+      _checkConnectionBackup();
+    }
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       var update = false;
@@ -766,6 +783,16 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
             ],
           ),
         SettingsSection(title: Text(translate("Settings")), tiles: [
+          if (!disabledSettings && _hasConnectionBackup)
+            SettingsTile(
+                title: Text(Localizations.localeOf(context).languageCode == 'ja'
+                    ? 'バックアップと復元'
+                    : 'Backup and restore'),
+                onPressed: (_) async {
+                  final opened = await gFFI.invokeMethodWithResult<bool>(
+                      'rustdesk_connection_backup', true);
+                  if (opened != true) showToast(translate('Failed'));
+                }),
           if (!disabledSettings && !_hideNetwork && !_hideServer)
             SettingsTile(
                 title: Text(translate('ID/Relay Server')),
