@@ -1,0 +1,386 @@
+diff --git a/flutter/lib/mobile/pages/remote_page.dart b/flutter/lib/mobile/pages/remote_page.dart
+index 9da67ab..98fc00d 100644
+--- a/flutter/lib/mobile/pages/remote_page.dart
++++ b/flutter/lib/mobile/pages/remote_page.dart
+@@ -18,6 +18,7 @@ import '../../common.dart';
+ import '../../common/widgets/overlay.dart';
+ import '../../common/widgets/dialog.dart';
+ import '../../common/widgets/remote_input.dart';
++import '../../models/input_modifier_utils.dart';
+ import '../../models/input_model.dart';
+ import '../../models/model.dart';
+ import '../../models/platform_model.dart';
+@@ -377,37 +378,50 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
+       // clipboard
+       oldValue = '';
+     }
+-    // This length-only diff assumes the IME appends at the end. If an IME
+-    // leaves the caret inside paired punctuation, later insertions can replay
+-    // the closing symbol: "()" -> "(a)" sends ")" instead of "a". This is a
+-    // client text-diff issue, independent of the host keyboard layout.
+-    if (newValue.length == oldValue.length) {
+-      // ?
+-    } else if (newValue.length < oldValue.length) {
+-      final char = 'VK_BACK';
+-      inputModel.inputKey(char);
+-    } else {
+-      final content = newValue.substring(oldValue.length);
+-      if (content.length > 1) {
+-        if (oldValue != '' &&
+-            content.length == 2 &&
+-            (content == '""' ||
+-                content == '()' ||
+-                content == '[]' ||
+-                content == '<>' ||
+-                content == "{}" ||
+-                content == '”“' ||
+-                content == '《》' ||
+-                content == '（）' ||
+-                content == '【】')) {
+-          // can not only input content[0], because when input ], [ are also auo insert, which cause ] never be input
+-          bind.sessionInputString(sessionId: sessionId, value: content);
+-          _openKeyboardUnlocked();
+-          return;
++    final delta = softKeyboardTextDelta(oldValue, newValue);
++    for (var i = 0; i < delta.deleteCount; i++) {
++      inputModel.inputKey('VK_BACK');
++    }
++    if (delta.insertText.isEmpty) {
++      return;
++    }
++
++    final shouldResetAutoPair = oldValue.isNotEmpty &&
++        delta.deleteCount == 0 &&
++        const {
++          '""',
++          '()',
++          '[]',
++          '<>',
++          '{}',
++          '”“',
++          '《》',
++          '（）',
++          '【】',
++        }.contains(delta.insertText);
++
++    _inputSoftKeyboardText(delta.insertText);
++    if (shouldResetAutoPair) {
++      // Reset the hidden buffer after IMEs insert both sides of an auto-pair.
++      _openKeyboardUnlocked();
++    }
++  }
++
++  void _inputSoftKeyboardText(String text) {
++    final parts = text.split('\n');
++    for (var i = 0; i < parts.length; i++) {
++      final part = parts[i];
++      if (part.isNotEmpty) {
++        final hasShortcutModifier =
++            inputModel.ctrl || inputModel.alt || inputModel.command;
++        if (hasShortcutModifier && part.characters.length == 1) {
++          inputChar(part);
++        } else {
++          bind.sessionInputString(sessionId: sessionId, value: part);
+         }
+-        bind.sessionInputString(sessionId: sessionId, value: content);
+-      } else {
+-        inputChar(content);
++      }
++      if (i < parts.length - 1) {
++        inputModel.inputKey('VK_RETURN');
+       }
+     }
+   }
+@@ -818,12 +832,37 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
+     ];
+   }
+ 
++  List<TTextMenu> _getKeyboardModeMenus() {
++    if (!isAndroid ||
++        !gFFI.ffiModel.keyboard ||
++        gFFI.ffiModel.pi.platform == kPeerPlatformAndroid) {
++      return [];
++    }
++    final supportedModes = [
++      kKeyLegacyMode,
++      kKeyMapMode,
++      kKeyTranslateMode,
++    ]
++        .where((mode) => bind.sessionIsKeyboardModeSupported(
++            sessionId: sessionId, mode: mode))
++        .toList();
++    if (supportedModes.length < 2) {
++      return [];
++    }
++    return [
++      TTextMenu(
++        child: Text(translate('Keyboard Settings')),
++        onPressed: changeKeyboardMode,
++      ),
++    ];
++  }
++
+   void showActions(String id) async {
+     final size = MediaQuery.of(context).size;
+     final x = 120.0;
+     final y = size.height;
+     final mobileActionMenus = _getMobileActionMenus();
+-    final menus = toolbarControls(context, id, gFFI);
++    final menus = _getKeyboardModeMenus() + toolbarControls(context, id, gFFI);
+ 
+     final List<PopupMenuEntry<int>> more = [
+       ...mobileActionMenus
+@@ -957,24 +996,48 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
+             )));
+   }
+ 
+-  // * Currently mobile does not enable map mode
+-  // void changePhysicalKeyboardInputMode() async {
+-  //   var current = await bind.sessionGetKeyboardMode(id: widget.id) ?? "legacy";
+-  //   gFFI.dialogManager.show((setState, close) {
+-  //     void setMode(String? v) async {
+-  //       await bind.sessionSetKeyboardMode(id: widget.id, value: v ?? "");
+-  //       setState(() => current = v ?? '');
+-  //       Future.delayed(Duration(milliseconds: 300), close);
+-  //     }
+-  //
+-  //     return CustomAlertDialog(
+-  //         title: Text(translate('Physical Keyboard Input Mode')),
+-  //         content: Column(mainAxisSize: MainAxisSize.min, children: [
+-  //           getRadio('Legacy mode', 'legacy', current, setMode),
+-  //           getRadio('Map mode', 'map', current, setMode),
+-  //         ]));
+-  //   }, clickMaskDismiss: true);
+-  // }
++  void changeKeyboardMode() async {
++    final modes = [
++      (kKeyLegacyMode, 'Legacy mode'),
++      (kKeyMapMode, 'Map mode'),
++      (kKeyTranslateMode, 'Translate mode'),
++    ]
++        .where((mode) => bind.sessionIsKeyboardModeSupported(
++            sessionId: sessionId, mode: mode.$1))
++        .toList();
++    var current =
++        await bind.sessionGetKeyboardMode(sessionId: sessionId) ??
++            kKeyLegacyMode;
++    if (!mounted) return;
++
++    gFFI.dialogManager.show((setState, close, _) {
++      void setMode(String? value) async {
++        if (value == null) return;
++        await bind.sessionSetKeyboardMode(
++            sessionId: sessionId, value: value);
++        await inputModel.updateKeyboardMode();
++        setState(() => current = value);
++        Future.delayed(const Duration(milliseconds: 300), close);
++      }
++
++      return CustomAlertDialog(
++        title: Text(translate('Keyboard Settings')),
++        content: Column(
++          mainAxisSize: MainAxisSize.min,
++          children: modes
++              .map((mode) => getRadio<String>(
++                    Text(translate(mode.$2)),
++                    mode.$1,
++                    current,
++                    setMode,
++                  ))
++              .toList(),
++        ),
++      );
++    }, clickMaskDismiss: true, backDismiss: true).then((_) {
++      _disableAndroidSoftKeyboard();
++    });
++  }
+ }
+ 
+ class KeyHelpTools extends StatefulWidget {
+diff --git a/flutter/lib/models/input_model.dart b/flutter/lib/models/input_model.dart
+index 995dd36..09a05d4 100644
+--- a/flutter/lib/models/input_model.dart
++++ b/flutter/lib/models/input_model.dart
+@@ -601,8 +601,7 @@ class InputModel {
+   // This function must be called after the peer info is received.
+   // Because `sessionGetKeyboardMode` relies on the peer version.
+   updateKeyboardMode() async {
+-    // * Currently mobile does not enable map mode
+-    if (isDesktop || isWebDesktop) {
++    if (isDesktop || isWebDesktop || isMobile) {
+       keyboardMode = await bind.sessionGetKeyboardMode(sessionId: sessionId) ??
+           kKeyLegacyMode;
+     }
+@@ -893,13 +892,13 @@ class InputModel {
+       handleKeyDownEventModifiers(e);
+     }
+ 
+-    bool isMobileAndMapMode = false;
++    bool isMobileAndNewKeyboardMode = false;
+     if (isMobile) {
+-      // Do not use map mode if mobile -> Android. Android does not support map mode for now.
++      // Do not use the new keyboard modes if mobile -> Android. Android does not support map mode for now.
+       // Because simulating the physical key events(uhid) which requires root permission is not supported.
+       if (peerPlatform != kPeerPlatformAndroid) {
+         if (isIOS) {
+-          isMobileAndMapMode = true;
++          isMobileAndNewKeyboardMode = true;
+         } else {
+           // The physicalKey.usbHidUsage may be not correct for soft keyboard on Android.
+           // iOS does not have this issue.
+@@ -917,7 +916,9 @@ class InputModel {
+           // The normal `usbHidUsage` for keyboard shoud be between [0x00000010, 0x000c029f]
+           // https://github.com/flutter/flutter/blob/c051b69e2a2224300e20d93dbd15f4b91e8844d1/packages/flutter/lib/src/services/keyboard_key.g.dart#L5332 - 5600
+           final isNormalHsbHidUsage = (e.physicalKey.usbHidUsage >> 20) == 0;
+-          isMobileAndMapMode = isNormalHsbHidUsage &&
++          isMobileAndNewKeyboardMode =
++              [kKeyMapMode, kKeyTranslateMode].contains(keyboardMode) &&
++              isNormalHsbHidUsage &&
+               // No need to check `!['Backspace', 'Enter'].contains(e.logicalKey.keyLabel)`
+               // But we still add it for more reliability.
+               !['Backspace', 'Enter'].contains(e.logicalKey.keyLabel);
+@@ -941,7 +942,7 @@ class InputModel {
+ 
+     final isDesktopAndMapMode =
+         isDesktop || (isWebDesktop && keyboardMode == kKeyMapMode);
+-    if (isMobileAndMapMode || isDesktopAndMapMode) {
++    if (isMobileAndNewKeyboardMode || isDesktopAndMapMode) {
+       _restoreFlutterShortcutModifiers(e);
+       // Native map input is matched and tracked by Rust before forwarding.
+       if (isWeb) {
+diff --git a/flutter/lib/models/input_modifier_utils.dart b/flutter/lib/models/input_modifier_utils.dart
+index 093e657..65c2cc7 100644
+--- a/flutter/lib/models/input_modifier_utils.dart
++++ b/flutter/lib/models/input_modifier_utils.dart
+@@ -8,6 +8,43 @@ enum TerminalInputSource {
+   paste,
+ }
+ 
++/// Describes how to mirror a hidden soft-keyboard text buffer to the peer.
++class SoftKeyboardTextDelta {
++  const SoftKeyboardTextDelta({
++    required this.deleteCount,
++    required this.insertText,
++  });
++
++  /// Number of trailing grapheme clusters to delete from the peer.
++  final int deleteCount;
++
++  /// Replacement text to append after deleting the changed suffix.
++  final String insertText;
++}
++
++/// Computes a suffix replacement between two soft-keyboard buffer values.
++///
++/// Android IMEs rewrite the active composing range in place (for example,
++/// `ohayo` becomes `おはよう`). Comparing only the string lengths misses those
++/// rewrites. Grapheme clusters are used so one visible emoji or combined
++/// character produces one Backspace on the peer.
++SoftKeyboardTextDelta softKeyboardTextDelta(String oldValue, String newValue) {
++  final oldGraphemes = oldValue.characters.toList(growable: false);
++  final newGraphemes = newValue.characters.toList(growable: false);
++  var commonPrefixLength = 0;
++  while (commonPrefixLength < oldGraphemes.length &&
++      commonPrefixLength < newGraphemes.length &&
++      oldGraphemes[commonPrefixLength] ==
++          newGraphemes[commonPrefixLength]) {
++    commonPrefixLength++;
++  }
++
++  return SoftKeyboardTextDelta(
++    deleteCount: oldGraphemes.length - commonPrefixLength,
++    insertText: newGraphemes.skip(commonPrefixLength).join(),
++  );
++}
++
+ /// Returns true when a stale mobile one-shot Shift state should be released
+ /// by replaying a tracked Shift key-down as a synthesized key-up.
+ ///
+diff --git a/flutter/lib/models/model.dart b/flutter/lib/models/model.dart
+index 20e71f1..1737df1 100644
+--- a/flutter/lib/models/model.dart
++++ b/flutter/lib/models/model.dart
+@@ -1360,10 +1360,9 @@ class FfiModel with ChangeNotifier {
+     // For desktop/webDesktop, keyboard mode initialization is handled later by
+     // checkDesktopKeyboardMode() which may change the mode if not supported,
+     // followed by updateKeyboardMode() to sync InputModel.keyboardMode.
+-    // For mobile, updateKeyboardMode() is currently a no-op (only executes on desktop/web),
+-    // but we call it here for consistency and future-proofing.
++    // Mobile also uses the saved mode when routing physical keyboard events.
+     if (isMobile) {
+-      parent.target?.inputModel.updateKeyboardMode();
++      await parent.target?.inputModel.updateKeyboardMode();
+     }
+     _pi.isSupportMultiUiSession =
+         bind.isSupportMultiUiSession(version: _pi.version);
+@@ -1489,7 +1488,6 @@ class FfiModel with ChangeNotifier {
+     if (isDesktop || isWebDesktop) {
+       // checkDesktopKeyboardMode may change the keyboard mode if the current
+       // mode is not supported. Re-sync InputModel.keyboardMode afterwards.
+-      // Note: updateKeyboardMode() is a no-op on mobile (early-returns).
+       await checkDesktopKeyboardMode();
+       await parent.target?.inputModel.updateKeyboardMode();
+     }
+diff --git a/flutter/test/input_modifier_utils_test.dart b/flutter/test/input_modifier_utils_test.dart
+index 4f5fb2a..3b096df 100644
+--- a/flutter/test/input_modifier_utils_test.dart
++++ b/flutter/test/input_modifier_utils_test.dart
+@@ -3,6 +3,36 @@ import 'package:flutter_test/flutter_test.dart';
+ import 'package:flutter_hbb/models/input_modifier_utils.dart';
+ 
+ void main() {
++  group('softKeyboardTextDelta', () {
++    test('replaces same-length Android IME composing text', () {
++      final delta = softKeyboardTextDelta('ohayo', 'おはよう');
++
++      expect(delta.deleteCount, 5);
++      expect(delta.insertText, 'おはよう');
++    });
++
++    test('keeps the unchanged hidden-buffer prefix', () {
++      final delta = softKeyboardTextDelta('111おhayo', '111おはよう');
++
++      expect(delta.deleteCount, 4);
++      expect(delta.insertText, 'はよう');
++    });
++
++    test('counts one visible grapheme as one deletion', () {
++      final delta = softKeyboardTextDelta('hello👍🏽', 'hello😊');
++
++      expect(delta.deleteCount, 1);
++      expect(delta.insertText, '😊');
++    });
++
++    test('appends committed text without deleting the prefix', () {
++      final delta = softKeyboardTextDelta('111', '111おはよう');
++
++      expect(delta.deleteCount, 0);
++      expect(delta.insertText, 'おはよう');
++    });
++  });
++
+   group('shouldReleaseStaleMobileShift', () {
+     test('releases one-shot mobile shift after a text key', () {
+       expect(
+diff --git a/src/keyboard.rs b/src/keyboard.rs
+index ca81316..a60f582 100644
+--- a/src/keyboard.rs
++++ b/src/keyboard.rs
+@@ -1508,7 +1508,7 @@ fn is_altgr(event: &Event) -> bool {
+ }
+ 
+ #[inline]
+-#[cfg(any(target_os = "linux", target_os = "windows"))]
++#[cfg(any(target_os = "android", target_os = "linux", target_os = "windows"))]
+ fn is_press(event: &Event) -> bool {
+     matches!(event.event_type, EventType::KeyPress(_))
+ }
+@@ -1561,7 +1561,7 @@ pub fn translate_keyboard_mode(peer: &str, event: &Event, key_event: KeyEvent) -
+     #[cfg(target_os = "windows")]
+     try_fill_win2win_hotkey(peer, event, &key_event, &mut events);
+ 
+-    #[cfg(any(target_os = "linux", target_os = "windows"))]
++    #[cfg(any(target_os = "android", target_os = "linux", target_os = "windows"))]
+     if events.is_empty() && is_press(event) {
+         try_fill_unicode(peer, event, &key_event, &mut events);
+     }
