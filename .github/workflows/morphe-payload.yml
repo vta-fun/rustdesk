@@ -1,4 +1,4 @@
-# Install as .github/workflows/morphe-payload.yml in the patched RustDesk checkout.
+# Temporary retry. Install as .github/workflows/morphe-payload.yml in one commit over the verified source.
 name: RustDesk 1.5.1 Morphe payload
 
 on:
@@ -7,9 +7,12 @@ on:
     branches: [codex/morphe-rustdesk-1.5.1]
 
 permissions:
+  actions: read
   contents: read
 
 env:
+  BRIDGE_SOURCE_RUN: "42124860635"
+  BRIDGE_SOURCE_SHA: "a6a7388bf16705af24b50ad5f6f45bd854f49197"
   RUST_VERSION: "1.75"
   CARGO_NDK_VERSION: "3.1.2"
   ANDROID_FLUTTER_VERSION: "3.24.5"
@@ -18,11 +21,7 @@ env:
   VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
 
 jobs:
-  generate-bridge:
-    uses: ./.github/workflows/bridge.yml
-
   build-arm64:
-    needs: generate-bridge
     runs-on: ubuntu-24.04
     timeout-minutes: 120
 
@@ -50,6 +49,18 @@ jobs:
         with:
           submodules: recursive
           persist-credentials: false
+          fetch-depth: 2
+
+      - name: Verify bridge artifact provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          bridge_sha="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BRIDGE_SOURCE_RUN" --jq '.head_sha')"
+          if [[ "$bridge_sha" != "$BRIDGE_SOURCE_SHA" ]]; then
+            echo "Unexpected source commit for the bridge artifact"
+            exit 1
+          fi
+          git diff --exit-code "$BRIDGE_SOURCE_SHA" HEAD -- . ':(exclude).github/workflows/morphe-payload.yml'
 
       - name: Install dependencies
         run: |
@@ -77,6 +88,8 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: bridge-artifact
+          github-token: ${{ github.token }}
+          run-id: ${{ env.BRIDGE_SOURCE_RUN }}
 
       - name: Test soft keyboard text handling
         working-directory: flutter
