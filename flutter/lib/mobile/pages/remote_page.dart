@@ -18,6 +18,7 @@ import '../../common.dart';
 import '../../common/widgets/overlay.dart';
 import '../../common/widgets/dialog.dart';
 import '../../common/widgets/remote_input.dart';
+import '../../models/input_modifier_utils.dart';
 import '../../models/input_model.dart';
 import '../../models/model.dart';
 import '../../models/platform_model.dart';
@@ -377,37 +378,50 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
       // clipboard
       oldValue = '';
     }
-    // This length-only diff assumes the IME appends at the end. If an IME
-    // leaves the caret inside paired punctuation, later insertions can replay
-    // the closing symbol: "()" -> "(a)" sends ")" instead of "a". This is a
-    // client text-diff issue, independent of the host keyboard layout.
-    if (newValue.length == oldValue.length) {
-      // ?
-    } else if (newValue.length < oldValue.length) {
-      final char = 'VK_BACK';
-      inputModel.inputKey(char);
-    } else {
-      final content = newValue.substring(oldValue.length);
-      if (content.length > 1) {
-        if (oldValue != '' &&
-            content.length == 2 &&
-            (content == '""' ||
-                content == '()' ||
-                content == '[]' ||
-                content == '<>' ||
-                content == "{}" ||
-                content == '”“' ||
-                content == '《》' ||
-                content == '（）' ||
-                content == '【】')) {
-          // can not only input content[0], because when input ], [ are also auo insert, which cause ] never be input
-          bind.sessionInputString(sessionId: sessionId, value: content);
-          _openKeyboardUnlocked();
-          return;
+    final delta = softKeyboardTextDelta(oldValue, newValue);
+    for (var i = 0; i < delta.deleteCount; i++) {
+      inputModel.inputKey('VK_BACK');
+    }
+    if (delta.insertText.isEmpty) {
+      return;
+    }
+
+    final shouldResetAutoPair = oldValue.isNotEmpty &&
+        delta.deleteCount == 0 &&
+        const {
+          '""',
+          '()',
+          '[]',
+          '<>',
+          '{}',
+          '”“',
+          '《》',
+          '（）',
+          '【】',
+        }.contains(delta.insertText);
+
+    _inputSoftKeyboardText(delta.insertText);
+    if (shouldResetAutoPair) {
+      // Reset the hidden buffer after IMEs insert both sides of an auto-pair.
+      _openKeyboardUnlocked();
+    }
+  }
+
+  void _inputSoftKeyboardText(String text) {
+    final parts = text.split('\n');
+    for (var i = 0; i < parts.length; i++) {
+      final part = parts[i];
+      if (part.isNotEmpty) {
+        final hasShortcutModifier =
+            inputModel.ctrl || inputModel.alt || inputModel.command;
+        if (hasShortcutModifier && part.characters.length == 1) {
+          inputChar(part);
+        } else {
+          bind.sessionInputString(sessionId: sessionId, value: part);
         }
-        bind.sessionInputString(sessionId: sessionId, value: content);
-      } else {
-        inputChar(content);
+      }
+      if (i < parts.length - 1) {
+        inputModel.inputKey('VK_RETURN');
       }
     }
   }
@@ -818,12 +832,37 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
     ];
   }
 
+  List<TTextMenu> _getKeyboardModeMenus() {
+    if (!isAndroid ||
+        !gFFI.ffiModel.keyboard ||
+        gFFI.ffiModel.pi.platform == kPeerPlatformAndroid) {
+      return [];
+    }
+    final supportedModes = [
+      kKeyLegacyMode,
+      kKeyMapMode,
+      kKeyTranslateMode,
+    ]
+        .where((mode) => bind.sessionIsKeyboardModeSupported(
+            sessionId: sessionId, mode: mode))
+        .toList();
+    if (supportedModes.length < 2) {
+      return [];
+    }
+    return [
+      TTextMenu(
+        child: Text(translate('Keyboard Settings')),
+        onPressed: changeKeyboardMode,
+      ),
+    ];
+  }
+
   void showActions(String id) async {
     final size = MediaQuery.of(context).size;
     final x = 120.0;
     final y = size.height;
     final mobileActionMenus = _getMobileActionMenus();
-    final menus = toolbarControls(context, id, gFFI);
+    final menus = _getKeyboardModeMenus() + toolbarControls(context, id, gFFI);
 
     final List<PopupMenuEntry<int>> more = [
       ...mobileActionMenus
@@ -957,24 +996,48 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
             )));
   }
 
-  // * Currently mobile does not enable map mode
-  // void changePhysicalKeyboardInputMode() async {
-  //   var current = await bind.sessionGetKeyboardMode(id: widget.id) ?? "legacy";
-  //   gFFI.dialogManager.show((setState, close) {
-  //     void setMode(String? v) async {
-  //       await bind.sessionSetKeyboardMode(id: widget.id, value: v ?? "");
-  //       setState(() => current = v ?? '');
-  //       Future.delayed(Duration(milliseconds: 300), close);
-  //     }
-  //
-  //     return CustomAlertDialog(
-  //         title: Text(translate('Physical Keyboard Input Mode')),
-  //         content: Column(mainAxisSize: MainAxisSize.min, children: [
-  //           getRadio('Legacy mode', 'legacy', current, setMode),
-  //           getRadio('Map mode', 'map', current, setMode),
-  //         ]));
-  //   }, clickMaskDismiss: true);
-  // }
+  void changeKeyboardMode() async {
+    final modes = [
+      (kKeyLegacyMode, 'Legacy mode'),
+      (kKeyMapMode, 'Map mode'),
+      (kKeyTranslateMode, 'Translate mode'),
+    ]
+        .where((mode) => bind.sessionIsKeyboardModeSupported(
+            sessionId: sessionId, mode: mode.$1))
+        .toList();
+    var current =
+        await bind.sessionGetKeyboardMode(sessionId: sessionId) ??
+            kKeyLegacyMode;
+    if (!mounted) return;
+
+    gFFI.dialogManager.show((setState, close, _) {
+      void setMode(String? value) async {
+        if (value == null) return;
+        await bind.sessionSetKeyboardMode(
+            sessionId: sessionId, value: value);
+        await inputModel.updateKeyboardMode();
+        setState(() => current = value);
+        Future.delayed(const Duration(milliseconds: 300), close);
+      }
+
+      return CustomAlertDialog(
+        title: Text(translate('Keyboard Settings')),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: modes
+              .map((mode) => getRadio<String>(
+                    Text(translate(mode.$2)),
+                    mode.$1,
+                    current,
+                    setMode,
+                  ))
+              .toList(),
+        ),
+      );
+    }, clickMaskDismiss: true, backDismiss: true).then((_) {
+      _disableAndroidSoftKeyboard();
+    });
+  }
 }
 
 class KeyHelpTools extends StatefulWidget {

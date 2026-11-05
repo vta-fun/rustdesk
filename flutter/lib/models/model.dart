@@ -1360,10 +1360,9 @@ class FfiModel with ChangeNotifier {
     // For desktop/webDesktop, keyboard mode initialization is handled later by
     // checkDesktopKeyboardMode() which may change the mode if not supported,
     // followed by updateKeyboardMode() to sync InputModel.keyboardMode.
-    // For mobile, updateKeyboardMode() is currently a no-op (only executes on desktop/web),
-    // but we call it here for consistency and future-proofing.
+    // Mobile also uses the saved mode when routing physical keyboard events.
     if (isMobile) {
-      parent.target?.inputModel.updateKeyboardMode();
+      await parent.target?.inputModel.updateKeyboardMode();
     }
     _pi.isSupportMultiUiSession =
         bind.isSupportMultiUiSession(version: _pi.version);
@@ -1489,7 +1488,6 @@ class FfiModel with ChangeNotifier {
     if (isDesktop || isWebDesktop) {
       // checkDesktopKeyboardMode may change the keyboard mode if the current
       // mode is not supported. Re-sync InputModel.keyboardMode afterwards.
-      // Note: updateKeyboardMode() is a no-op on mobile (early-returns).
       await checkDesktopKeyboardMode();
       await parent.target?.inputModel.updateKeyboardMode();
     }
