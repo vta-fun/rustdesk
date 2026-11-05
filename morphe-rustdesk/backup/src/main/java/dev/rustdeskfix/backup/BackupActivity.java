@@ -31,6 +31,16 @@ public final class BackupActivity extends Activity {
     private static final String PICKER_REQUEST = "pickerRequest";
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
 
+    public static boolean fromSettings(Activity activity, Object open) {
+        if (!Boolean.TRUE.equals(open)) return true;
+        try {
+            activity.startActivity(new Intent(activity, BackupActivity.class));
+            return true;
+        } catch (ActivityNotFoundException | SecurityException error) {
+            return false;
+        }
+    }
+
     private enum Status {
         READY, CHECKING, EXPORTING, EXPORTED, EXPORT_FAILED,
         READING, INVALID_BACKUP, STAGING, STAGE_FAILED, SIGN_OUT_REQUIRED, PICKER_FAILED, SETTINGS_FAILED

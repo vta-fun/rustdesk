@@ -1,18 +1,21 @@
 package dev.rustdeskfix.patches
 
 import app.morphe.patcher.extensions.InstructionExtensions.addInstructions
+import app.morphe.patcher.extensions.InstructionExtensions.addInstructionsWithLabels
 import app.morphe.patcher.patch.ApkFileType
 import app.morphe.patcher.patch.AppTarget
 import app.morphe.patcher.patch.Compatibility
 import app.morphe.patcher.patch.PatchException
 import app.morphe.patcher.patch.bytecodePatch
 import app.morphe.patcher.patch.resourcePatch
+import app.morphe.patcher.util.smali.ExternalLabel
 import com.android.tools.smali.dexlib2.iface.instruction.ReferenceInstruction
 import org.w3c.dom.Element
 
 private const val ANDROID_NS = "http://schemas.android.com/apk/res/android"
 private const val BACKUP_ACTIVITY = "dev.rustdeskfix.backup.BackupActivity"
 private const val MAIN_APPLICATION = "Lcom/carriez/flutter_hbb/MainApplication;"
+private const val MAIN_ACTIVITY = "Lcom/carriez/flutter_hbb/MainActivity;"
 private const val ANDROID_ON_CREATE = "Landroid/app/Application;->onCreate()V"
 private const val RUSTDESK_ON_APP_START = "Lffi/FFI;->onAppStart(Landroid/content/Context;)V"
 private const val APPLY_PENDING = "Ldev/rustdeskfix/backup/BackupStore;->applyPending(Landroid/content/Context;)V"
@@ -36,13 +39,45 @@ private val backupStartupPatch = bytecodePatch {
             throw PatchException("The RustDesk startup sequence does not match version 1.5.1.")
         }
         onCreate.addInstructions(superCall + 1, "invoke-static {p0}, $APPLY_PENDING")
+
+        // R8 names in the official RustDesk 1.5.1 ARM64 APK's MethodChannel handler.
+        val channel = mutableClassDefBy(MAIN_ACTIVITY).methods.singleOrNull { method ->
+            method.name == "J0" && method.parameterTypes.map { it.toString() } ==
+                listOf(MAIN_ACTIVITY, "Lz2/j;", "Lz2/k\$d;") && method.returnType == "V"
+        } ?: throw PatchException("The RustDesk settings channel was not found.")
+        val channelBody = channel.implementation
+            ?: throw PatchException("The RustDesk settings channel has no instructions.")
+        if (channelBody.registerCount != 36) {
+            throw PatchException("The RustDesk settings channel does not match version 1.5.1 ARM64.")
+        }
+        channel.addInstructionsWithLabels(
+            0,
+            """
+                move-object/from16 v0, p1
+                iget-object v1, v0, Lz2/j;->a:Ljava/lang/String;
+                const-string v2, "rustdesk_connection_backup"
+                invoke-virtual {v2, v1}, Ljava/lang/String;->equals(Ljava/lang/Object;)Z
+                move-result v1
+                if-eqz v1, :stock_handler
+                iget-object v1, v0, Lz2/j;->b:Ljava/lang/Object;
+                move-object/from16 v0, p0
+                invoke-static {v0, v1}, Ldev/rustdeskfix/backup/BackupActivity;->fromSettings(Landroid/app/Activity;Ljava/lang/Object;)Z
+                move-result v1
+                invoke-static {v1}, Ljava/lang/Boolean;->valueOf(Z)Ljava/lang/Boolean;
+                move-result-object v1
+                move-object/from16 v0, p2
+                invoke-interface {v0, v1}, Lz2/k${'$'}d;->a(Ljava/lang/Object;)V
+                return-void
+            """.trimIndent(),
+            ExternalLabel("stock_handler", channelBody.instructions.first()),
+        )
     }
 }
 
 @Suppress("unused")
 val settingsBackupPatch = resourcePatch(
     name = "Settings backup and restore",
-    description = "Adds a RustDesk Backup launcher for exporting settings and restoring them at app startup using the Android file picker.",
+    description = "Adds Backup and restore to RustDesk Settings, with the Android file picker and restore at app startup.",
     default = false,
 ) {
     compatibleWith(
@@ -53,7 +88,7 @@ val settingsBackupPatch = resourcePatch(
             targets = listOf(AppTarget(version = "1.5.1")),
         ),
     )
-    dependsOn(backupStartupPatch)
+    dependsOn(backupFlutterPatch, backupStartupPatch)
 
     execute {
         document("AndroidManifest.xml").use { manifest ->
@@ -63,23 +98,16 @@ val settingsBackupPatch = resourcePatch(
             for (index in 0 until activities.length) {
                 val activity = activities.item(index) as Element
                 if (activity.getAttribute("android:name") == BACKUP_ACTIVITY) {
-                    throw PatchException("The RustDesk Backup launcher is already installed. Patch an original RustDesk APK.")
+                    throw PatchException("The RustDesk backup activity is already installed. Patch an original RustDesk APK.")
                 }
             }
             val activity = manifest.createElement("activity").apply {
                 setAttributeNS(ANDROID_NS, "android:name", BACKUP_ACTIVITY)
-                setAttributeNS(ANDROID_NS, "android:exported", "true")
+                setAttributeNS(ANDROID_NS, "android:exported", "false")
                 setAttributeNS(ANDROID_NS, "android:label", "RustDesk Backup")
                 setAttributeNS(ANDROID_NS, "android:launchMode", "singleTop")
                 setAttributeNS(ANDROID_NS, "android:theme", "@android:style/Theme.Material.Light.NoActionBar")
             }
-            val intentFilter = manifest.createElement("intent-filter")
-            for ((tag, name) in listOf("action" to "android.intent.action.MAIN", "category" to "android.intent.category.LAUNCHER")) {
-                intentFilter.appendChild(manifest.createElement(tag).apply {
-                    setAttributeNS(ANDROID_NS, "android:name", name)
-                })
-            }
-            activity.appendChild(intentFilter)
             application.appendChild(activity)
         }
     }

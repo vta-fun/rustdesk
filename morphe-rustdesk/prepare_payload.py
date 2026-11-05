@@ -1,4 +1,4 @@
-"""Prepare the two rebuilt Android libraries for the Morphe patch bundle."""
+"""Prepare rebuilt RustDesk Android libraries for the Morphe patch bundle."""
 
 import argparse
 import hashlib
@@ -12,6 +12,7 @@ from zipfile import BadZipFile, ZIP_STORED, ZipFile
 STOCK_SHA256 = "cfc44193ef96dd601d25c9a29f1aa5385effdbaae33d2abbb1d88495797f6b84"
 LIB_DIR = "lib/arm64-v8a/"
 REPLACEMENTS = ("libapp.so", "librustdesk.so")
+BACKUP_APP = "libapp-backup.so"
 FLUTTER_ENGINE = "libflutter.so"
 CXX_RUNTIME = "libc++_shared.so"
 PAYLOAD_DIR = (
@@ -96,24 +97,28 @@ def verify_patched(stock, patched, rebuilt):
             raise ValueError(f"The patched APK modified {name}")
 
 
-def prepare(stock_path, rebuilt_path, patched_path):
+def check_flutter_compatibility(apk, engine, stock_assets):
+    native_libraries(apk)
+    if engine != apk.read(LIB_DIR + FLUTTER_ENGINE):
+        raise ValueError(f"{apk.filename}: Flutter engine differs from the stock APK")
+    assets = flutter_assets(apk)
+    if stock_assets != assets:
+        differing = sorted(
+            name for name in stock_assets.keys() | assets.keys()
+            if stock_assets.get(name) != assets.get(name)
+        )
+        raise ValueError(f"{apk.filename}: Flutter assets differ: " + ", ".join(differing))
+
+
+def prepare(stock_path, rebuilt_path, backup_path, patched_path):
     if file_sha256(stock_path) != STOCK_SHA256:
         raise ValueError("The stock APK must be the official RustDesk 1.5.1 AArch64 release")
 
     with ZipFile(stock_path) as stock, ZipFile(rebuilt_path) as rebuilt:
         native_libraries(stock)
-        native_libraries(rebuilt)
         engine = stock.read(LIB_DIR + FLUTTER_ENGINE)
-        if engine != rebuilt.read(LIB_DIR + FLUTTER_ENGINE):
-            raise ValueError("Flutter engine mismatch between the stock and rebuilt APKs")
         stock_assets = flutter_assets(stock)
-        rebuilt_assets = flutter_assets(rebuilt)
-        if stock_assets != rebuilt_assets:
-            differing = sorted(
-                name for name in stock_assets.keys() | rebuilt_assets.keys()
-                if stock_assets.get(name) != rebuilt_assets.get(name)
-            )
-            raise ValueError("Flutter assets differ between APKs: " + ", ".join(differing))
+        check_flutter_compatibility(rebuilt, engine, stock_assets)
 
         original = {
             name: read_arm64_elf(stock, name) for name in (*REPLACEMENTS, CXX_RUNTIME)
@@ -129,6 +134,13 @@ def prepare(stock_path, rebuilt_path, patched_path):
             print(f"Verified Morphe output: {patched_path}")
             return
 
+        with ZipFile(backup_path) as backup:
+            check_flutter_compatibility(backup, engine, stock_assets)
+            backup_app = read_arm64_elf(backup, "libapp.so")
+            if backup_app in (original["libapp.so"], replacement["libapp.so"]):
+                raise ValueError("The backup-only Flutter library must be a separate build")
+            replacement[BACKUP_APP] = backup_app
+
     original[FLUTTER_ENGINE] = engine
     checksums = "".join(
         f"{kind}.{name}={sha256(data)}\n"
@@ -141,7 +153,7 @@ def prepare(stock_path, rebuilt_path, patched_path):
         for name, data in replacement.items():
             (staging / name).write_bytes(data)
         (staging / "sha256.properties").write_text(checksums, encoding="ascii")
-        for name in (*REPLACEMENTS, "sha256.properties"):
+        for name in (*replacement, "sha256.properties"):
             (staging / name).replace(PAYLOAD_DIR / name)
     print(f"Prepared verified arm64-v8a payload: {PAYLOAD_DIR}")
 
@@ -150,10 +162,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("stock_apk", type=Path)
     parser.add_argument("rebuilt_apk", type=Path)
+    parser.add_argument("--backup-only", type=Path, help="APK built with only the settings entry")
     parser.add_argument("--patched", type=Path, help="verify the Morphe output instead")
     args = parser.parse_args()
+    if args.backup_only is None and args.patched is None:
+        parser.error("--backup-only is required when preparing the bundle")
     try:
-        prepare(args.stock_apk, args.rebuilt_apk, args.patched)
+        prepare(args.stock_apk, args.rebuilt_apk, args.backup_only, args.patched)
     except (BadZipFile, OSError, KeyError, ValueError, struct.error) as error:
         parser.exit(1, f"{error}\n")
 
