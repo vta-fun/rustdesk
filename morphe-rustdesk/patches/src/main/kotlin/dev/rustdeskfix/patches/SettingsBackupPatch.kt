@@ -15,7 +15,6 @@ import org.w3c.dom.Element
 
 private const val ANDROID_NS = "http://schemas.android.com/apk/res/android"
 private const val BACKUP_ACTIVITY = "dev.rustdeskfix.backup.BackupActivity"
-private const val BACKUP_ALIAS = "dev.rustdeskfix.backup.BackupLauncher"
 private const val MAIN_APPLICATION = "Lcom/carriez/flutter_hbb/MainApplication;"
 private const val MAIN_ACTIVITY = "Lcom/carriez/flutter_hbb/MainActivity;"
 private const val ANDROID_ON_CREATE = "Landroid/app/Application;->onCreate()V"
@@ -117,8 +116,9 @@ private val backupStartupPatch = bytecodePatch {
 @Suppress("unused")
 val settingsBackupPatch = resourcePatch(
     name = "Settings backup and restore",
-    description = "Adds Backup and restore to RustDesk: connection history, favorites and server " +
-        "settings are written to a file through the Android file picker and restored at app startup.",
+    description = "Adds Backup and restore to RustDesk Settings: connection history, favorites and " +
+        "server settings are written to a file through the Android file picker and restored at " +
+        "app startup. Replaces libapp.so with a build of this fork, which carries the entry.",
     default = false,
 ) {
     compatibleWith(
@@ -131,7 +131,7 @@ val settingsBackupPatch = resourcePatch(
             targets = listOf(AppTarget(version = "1.5.1"), AppTarget(version = null)),
         ),
     )
-    dependsOn(rustdeskExtension, backupStartupPatch)
+    dependsOn(rustdeskExtension, backupStartupPatch, libappPayloadPatch)
 
     execute {
         document("AndroidManifest.xml").use { manifest ->
@@ -145,29 +145,8 @@ val settingsBackupPatch = resourcePatch(
                 }
             }
             application.appendChild(manifest.activity())
-            application.appendChild(manifest.launcherAlias())
         }
     }
-}
-
-/**
- * The settings page that calls `rustdesk_connection_backup` is Dart compiled into libapp.so, so a
- * launcher alias is the entry point that does not require replacing any Rust or Flutter library.
- */
-private fun Document.launcherAlias(): Element {
-    val alias = createElement("activity-alias")
-    alias.setAttributeNS(ANDROID_NS, "android:name", BACKUP_ALIAS)
-    alias.setAttributeNS(ANDROID_NS, "android:targetActivity", BACKUP_ACTIVITY)
-    alias.setAttributeNS(ANDROID_NS, "android:exported", "true")
-    alias.setAttributeNS(ANDROID_NS, "android:label", "RustDesk Backup")
-    alias.setAttributeNS(ANDROID_NS, "android:launchMode", "singleTop")
-    alias.appendChild(
-        createElement("intent-filter").apply {
-            appendChild(element("action", "android:name", "android.intent.action.MAIN"))
-            appendChild(element("category", "android:name", "android.intent.category.LAUNCHER"))
-        },
-    )
-    return alias
 }
 
 private fun Document.activity(): Element {

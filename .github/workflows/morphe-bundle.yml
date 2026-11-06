@@ -57,23 +57,27 @@ jobs:
             -r "$RUNNER_TEMP/result.json"
           grep --quiet '"success":true' "$RUNNER_TEMP/result.json"
 
-      - name: Check that the patched APK keeps the official native libraries
+      - name: Check that only libapp.so was replaced
         run: |
           if ! command -v unzip >/dev/null; then sudo apt-get install -y unzip; fi
-          for lib in libapp.so librustdesk.so libflutter.so; do
-            original="$(unzip -p "$RUNNER_TEMP/rustdesk.apk" "lib/arm64-v8a/$lib" | sha256sum | cut -d' ' -f1)"
-            patched="$(unzip -p "$RUNNER_TEMP/patched.apk" "lib/arm64-v8a/$lib" | sha256sum | cut -d' ' -f1)"
-            if [ -z "$original" ]; then
+          hash() { unzip -p "$1" "lib/arm64-v8a/$2" | sha256sum | cut -d' ' -f1; }
+          for lib in librustdesk.so libflutter.so libc++_shared.so; do
+            official="$(hash "$RUNNER_TEMP/rustdesk.apk" "$lib")"
+            if [ -z "$official" ]; then
               echo "::error::$lib could not be read from the official APK"
               exit 1
             fi
-            if [ "$original" != "$patched" ]; then
+            if [ "$official" != "$(hash "$RUNNER_TEMP/patched.apk" "$lib")" ]; then
               echo "::error::$lib differs from the official APK"
               exit 1
             fi
           done
+          if [ "$(hash "$RUNNER_TEMP/rustdesk.apk" libapp.so)" = "$(hash "$RUNNER_TEMP/patched.apk" libapp.so)" ]; then
+            echo "::error::libapp.so was not replaced"
+            exit 1
+          fi
 
-      - name: Check that the hooks reached the patched APK
+      - name: Check that the hooks and the Settings entry reached the patched APK
         run: |
           unzip -Z1 "$RUNNER_TEMP/patched.apk" | grep -E '\.dex$|AndroidManifest' | sort
           found() {
@@ -81,12 +85,7 @@ jobs:
           }
           found 'classes*.dex' "rustdesk_connection_backup" || { echo "::error::the restore hook is missing"; exit 1; }
           found 'classes*.dex' "ImeEditReplayer" || { echo "::error::the IME helper is missing"; exit 1; }
-          # The manifest is binary XML and stores its strings as UTF-16.
-          if ! unzip -p "$RUNNER_TEMP/patched.apk" "AndroidManifest.xml" | tr -d '\000' | grep --quiet --text "BackupLauncher"; then
-            echo "::error::the launcher alias is missing"
-            exit 1
-          fi
-
+          found 'lib/arm64-v8a/libapp.so' "rustdesk_connection_backup" || { echo "::error::the Settings entry is missing from libapp.so"; exit 1; }
       - name: Upload the patch bundle
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:

@@ -1,6 +1,6 @@
 # RustDesk 用 Morphe パッチ
 
-RustDesk 本体の `libapp.so` / `librustdesk.so` を差し替えず、dex と AndroidManifest だけを書き換える軽量パッチです。公式の RustDesk 1.5.1 AArch64 APK にそのまま適用でき、パッチ一式は 50 KB 程度です。
+公式 RustDesk 1.5.1 AArch64 APK に適用するパッチです。IME 修正とバックアップのフックは dex と AndroidManifest への注入だけで実装し、`librustdesk.so` は無改変、`libapp.so` だけを設定画面に項目を出すためのビルドに差し替えます。パッチ一式は約 5 MB（うち `libapp.so` が 11.9 MB、圧縮後 5 MB）です。
 
 - [公式 RustDesk 1.5.1 AArch64 APK](https://github.com/rustdesk/rustdesk/releases/download/1.5.1/rustdesk-1.5.1-aarch64-signed.apk)
 - [パッチのソース](https://github.com/vta-fun/rustdesk/tree/codex/morphe-ime-favorites)
@@ -10,9 +10,9 @@ RustDesk 本体の `libapp.so` / `librustdesk.so` を差し替えず、dex と A
 | パッチ | 既定 | 内容 |
 |---|---|---|
 | `Fix Japanese soft keyboard input` | 有効 | IME が隠し入力欄を書き換えたときの削除を 1 文字ずつ接続先へ送ります。濁点・小書き・ローマ字変換・ATOK の確定入力が崩れなくなります。 |
-| `Settings backup and restore` | 無効 | 接続履歴・お気に入り・ID/リレー/API サーバー設定・公開鍵を JSON に保存し、再起動時に取り込みます。 |
+| `Settings backup and restore` | 無効 | 接続履歴・お気に入り・ID/リレー/API サーバー設定・公開鍵を JSON に保存し、再起動時に取り込みます。設定画面に項目を出すため `libapp.so` を差し替えます。 |
 
-どちらもネイティブライブラリを置き換えないため、公式 APK の署名済みバイナリはそのまま残ります。
+`libapp.so` は「設定画面の項目を載せた Dart スナップショット」に差し替えます。互換性の条件は Flutter エンジンと Flutter アセットが公式と同一であることで、ビルド時に `libflutter.so` と `assets/flutter_assets` の一致を確認しています。`librustdesk.so` と `libc++_shared.so` は差し替えません。
 
 対象メソッドは名前ではなく形（引数・戻り値・内部の文字列参照）で探します。R8 はリリースごとに名前を変えるため、名前を固定すると 1.5.2 以降で止まるためです。形が一致しない場合はパッチ適用時に例外で止まり、壊れた APK は出力しません。`Settings backup and restore` は 1.5.1 以外の版にも表示されます。
 
@@ -26,9 +26,7 @@ RustDesk 本体の `libapp.so` / `librustdesk.so` を差し替えず、dex と A
 
 ## バックアップと復元
 
-パッチ適用後に追加される **RustDesk Backup** のアイコン（ランチャー）から開きます。保存先と復元元は Android のファイル選択画面で指定し、Shizuku は不要です。
-
-RustDesk の設定画面に項目を出すには Dart 側（`libapp.so`）の差し替えが要るため、軽量版では設定画面ではなくランチャーから開く形にしています。`rustdesk_connection_backup` の設定チャンネルフックは残してあるので、Dart を差し替えた APK では設定画面からも開けます。
+パッチ適用後、RustDesk の **設定 → バックアップと復元** から開きます。保存先と復元元は Android のファイル選択画面で指定し、Shizuku は不要です。ランチャーに別アイコンは出ません（1.2.x の `activity-alias` は 1.3.0 で廃止しました）。
 
 - バックアップ対象: 接続先、最後に使った接続 ID、お気に入り、ID・リレー・API サーバーの設定とサーバー公開鍵。
 - 保存パスワード、ログイントークン、端末の RustDesk ID と秘密鍵は書き出しません。
@@ -40,7 +38,8 @@ RustDesk の設定画面に項目を出すには Dart 側（`libapp.so`）の差
 |---|---|
 | `patches/src/main/kotlin/` | パッチ定義。フィンガープリントで難読化された対象メソッドを探し、smali を注入します。 |
 | `backup/src/main/java/` | バックアップ／復元の画面と TOML・JSON の読み書き。 |
-| `ime/src/main/java/` | IME の編集差分を `TextInputPlugin` へ再送するヘルパー。 |
+| `ime/src/main/java/` | IME の編集差分を `TextInputPlugin` へ再送するヘルパー。
+| `payload/rustdesk/1.5.1/arm64-v8a/` | 差し替え用 `libapp.so` と、元/差し替え後の SHA-256。 |
 | `deploy-r2.ps1` | R2 への公開と `patches-bundle.json` の更新。 |
 
 ## ビルド
@@ -52,6 +51,8 @@ cd morphe-rustdesk
 .\gradlew.bat :patches:buildAndroid
 # => patches\build\libs\patches-<version>.mpp
 ```
+
+`payload/` の中身は `morphe-apk.yml` の `backup` バリアント（設定画面の項目だけを持つビルド）から取り出します。公式 APK と `libflutter.so` および `assets/flutter_assets` が一致することを確認してから `lib/arm64-v8a/libapp.so` を配置し、`sha256.properties` に `original.libapp.so`（公式 APK の値）と `patched.libapp.so`（差し替え後）を書きます。パッチは両方のハッシュを照合するので、公式 APK か payload が違えば適用時に止まります。
 
 公式 APK への適用確認まで行う場合は JDK 21 が必要です。
 

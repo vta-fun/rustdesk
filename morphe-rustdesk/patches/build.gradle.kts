@@ -8,7 +8,7 @@ plugins {
     kotlin("jvm") version "2.4.21"
 }
 
-version = "1.2.1"
+version = "1.3.0"
 
 repositories {
     mavenCentral()
@@ -86,6 +86,11 @@ val compileExtensionDex = tasks.register<JavaExec>("compileExtensionDex") {
     }
 }
 
+val payload = layout.projectDirectory.dir("../payload")
+sourceSets.main {
+    resources.srcDir(payload)
+}
+
 dependencies {
     // The runtime already provides the Patcher API. Compile against the official CLI release to build without a GitHub Packages token.
     compileOnly(files(desktopJar))
@@ -114,6 +119,12 @@ val compilePatchDex = tasks.register<JavaExec>("compilePatchDex") {
 
 tasks.jar {
     dependsOn(compilePatchDex, compileExtensionDex)
+    doFirst {
+        val lib = payload.dir("rustdesk/1.5.1/arm64-v8a")
+        for (name in listOf("sha256.properties", "libapp.so")) {
+            check(lib.file(name).asFile.isFile) { "Missing $name. See the payload section of README.md." }
+        }
+    }
     archiveExtension.set("mpp")
     isPreserveFileTimestamps = false
     isReproducibleFileOrder = true

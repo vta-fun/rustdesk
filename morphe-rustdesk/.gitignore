@@ -4,3 +4,4 @@
 /patches/build/
 /dist/
 __pycache__/
+!/payload/rustdesk/
