@@ -81,7 +81,11 @@ jobs:
           }
           found 'classes*.dex' "rustdesk_connection_backup" || { echo "::error::the restore hook is missing"; exit 1; }
           found 'classes*.dex' "ImeEditReplayer" || { echo "::error::the IME helper is missing"; exit 1; }
-          found "AndroidManifest.xml" "BackupLauncher" || { echo "::error::the launcher alias is missing"; exit 1; }
+          # The manifest is binary XML and stores its strings as UTF-16.
+          if ! unzip -p "$RUNNER_TEMP/patched.apk" "AndroidManifest.xml" | tr -d '\000' | grep --quiet --text "BackupLauncher"; then
+            echo "::error::the launcher alias is missing"
+            exit 1
+          fi
 
       - name: Upload the patch bundle
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
