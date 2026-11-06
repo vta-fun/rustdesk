@@ -14,6 +14,8 @@ RustDesk 本体の `libapp.so` / `librustdesk.so` を差し替えず、dex と A
 
 どちらもネイティブライブラリを置き換えないため、公式 APK の署名済みバイナリはそのまま残ります。
 
+対象メソッドは名前ではなく形（引数・戻り値・内部の文字列参照）で探します。R8 はリリースごとに名前を変えるため、名前を固定すると 1.5.2 以降で止まるためです。形が一致しない場合はパッチ適用時に例外で止まり、壊れた APK は出力しません。`Settings backup and restore` は 1.5.1 以外の版にも表示されます。
+
 ## Morphe Manager で適用
 
 1. Sources で Remote ソースを追加し、`patches-bundle.json` の公開 URL を入力します。ローカルの `.mpp` を Sources に取り込むこともできます。
@@ -55,7 +57,7 @@ cd morphe-rustdesk
 
 ```powershell
 java -jar patches\build\tools\morphe-desktop-2.0.0-all.jar patch --unsigned `
-  -p patches\build\libs\patches-1.2.0.mpp `
+  -p patches\build\libs\patches-1.2.1.mpp `
   rustdesk-1.5.1-aarch64-signed.apk -o rustdesk-patched.apk
 ```
 
@@ -75,9 +77,14 @@ java -jar patches\build\tools\morphe-desktop-2.0.0-all.jar patch --unsigned `
 
 `-StageDirectory .\dist` を指定すると、ローカルに配布ファイルだけを生成できます。公開後にバンドルの中身を変更する場合は `patches/build.gradle.kts` のバージョンも上げてください。
 
-## 旧方式（ペイロード差し替え）
+## CI
 
-`prepare_payload.py`、`rustdesk-1.5.1.patch`、`rustdesk-backup-settings.patch`、`.github/workflows/morphe-*.yml` は、ビルド済み `libapp.so` / `librustdesk.so` を差し替える以前の方式の名残です。現在のバンドルはこれらを必要としません。
+| ワークフロー | 内容 |
+|---|---|
+| `.github/workflows/morphe-bundle.yml` | `.mpp` をビルドし、公式 1.5.1 APK に実際に適用して検証します。`libapp.so` / `librustdesk.so` / `libflutter.so` が公式と同一であること、フックが dex と manifest に入っていることまで確認します。所要 5 分程度。 |
+| `.github/workflows/morphe-apk.yml` | このフォークの Dart / Rust 変更を含む Android APK をビルドします（`full` と `backup` の 2 種）。`bridge.yml` を同じ実行内で呼ぶため、過去の run-id に依存しません。パッチバンドルはこの APK を必要としません。 |
+
+以前の `morphe-payload.yml` / `morphe-settings-payload.yml` / `morphe-fixes.yml` / `morphe-fixes-backup-retry.yml` は、ビルド済みライブラリをペイロードとして取り出すための重複ワークフローでした。`morphe-apk.yml` に統合して削除しています。
 
 ## ライセンス
 

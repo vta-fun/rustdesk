@@ -1,10 +1,18 @@
-# Install as .github/workflows/morphe-payload.yml in the patched RustDesk checkout.
-name: RustDesk 1.5.1 Morphe payload
+# Builds RustDesk from this fork for Android. The patch bundle in morphe-rustdesk/ does not need
+# these APKs; this workflow is for the fork's own Dart and Rust changes.
+name: RustDesk Morphe APK
 
 on:
   workflow_dispatch:
   push:
-    branches: [codex/morphe-rustdesk-1.5.1]
+    branches: [codex/morphe-ime-favorites]
+    paths:
+      - .github/workflows/morphe-apk.yml
+      - .github/workflows/bridge.yml
+      - flutter/lib/**
+      - flutter/test/**
+      - src/**
+      - libs/**
 
 permissions:
   contents: read
@@ -18,13 +26,17 @@ env:
   VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
 
 jobs:
-  generate-bridge:
+  bridge:
     uses: ./.github/workflows/bridge.yml
 
-  build-arm64:
-    needs: generate-bridge
+  apk:
+    needs: bridge
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [full, backup]
 
     steps:
       - name: Free disk space
@@ -45,16 +57,26 @@ jobs:
             core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
-      - name: Checkout patched source
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Checkout source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           submodules: recursive
           persist-credentials: false
+          fetch-depth: 0
+
+      - name: Keep the stock keyboard for the backup variant
+        if: matrix.variant == 'backup'
+        run: |
+          git restore --source=23e5bb471a040d62f0a6ad52591fb30784265b73 -- \
+            flutter/lib/common/widgets/remote_input.dart flutter/lib/mobile/pages/remote_page.dart \
+            flutter/lib/models/input_model.dart flutter/lib/models/input_modifier_utils.dart \
+            flutter/lib/models/model.dart flutter/test/input_modifier_utils_test.dart src/keyboard.rs
 
       - name: Install dependencies
+        timeout-minutes: 6
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update
+          sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y \
             clang cmake curl gcc-multilib git g++ g++-multilib \
             libayatana-appindicator3-dev libasound2-dev libc6-dev libclang-dev \
             libunwind-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
@@ -74,7 +96,7 @@ jobs:
           git -C "$sdk_root" apply "$GITHUB_WORKSPACE/.github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff"
 
       - name: Restore bridge files
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v5
         with:
           name: bridge-artifact
 
@@ -115,7 +137,7 @@ jobs:
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
         with:
-          prefix-key: rustdesk-lib-cache-android
+          prefix-key: rustdesk-lib-cache-android-${{ matrix.variant }}
           key: aarch64-linux-android
 
       - name: Build Rust and Flutter
@@ -139,10 +161,10 @@ jobs:
           cd flutter
           flutter build apk --release --target-platform android-arm64 --split-per-abi
 
-      - name: Upload the payload build
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - name: Upload the APK
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: rustdesk-1.5.1-morphe-payload-arm64
+          name: rustdesk-morphe-${{ matrix.variant }}-arm64
           path: flutter/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
           if-no-files-found: error
           retention-days: 14
