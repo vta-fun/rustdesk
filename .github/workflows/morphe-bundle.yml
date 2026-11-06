@@ -59,9 +59,14 @@ jobs:
 
       - name: Check that the patched APK keeps the official native libraries
         run: |
+          if ! command -v unzip >/dev/null; then sudo apt-get install -y unzip; fi
           for lib in libapp.so librustdesk.so libflutter.so; do
             original="$(unzip -p "$RUNNER_TEMP/rustdesk.apk" "lib/arm64-v8a/$lib" | sha256sum | cut -d' ' -f1)"
             patched="$(unzip -p "$RUNNER_TEMP/patched.apk" "lib/arm64-v8a/$lib" | sha256sum | cut -d' ' -f1)"
+            if [ -z "$original" ]; then
+              echo "::error::$lib could not be read from the official APK"
+              exit 1
+            fi
             if [ "$original" != "$patched" ]; then
               echo "::error::$lib differs from the official APK"
               exit 1
@@ -70,9 +75,13 @@ jobs:
 
       - name: Check that the hooks reached the patched APK
         run: |
-          unzip -p "$RUNNER_TEMP/patched.apk" classes3.dex | grep --quiet --text "rustdesk_connection_backup"
-          unzip -p "$RUNNER_TEMP/patched.apk" classes4.dex | grep --quiet --text "ImeEditReplayer"
-          unzip -p "$RUNNER_TEMP/patched.apk" AndroidManifest.xml | grep --quiet --text "BackupLauncher"
+          unzip -Z1 "$RUNNER_TEMP/patched.apk" | grep -E '\.dex$|AndroidManifest' | sort
+          found() {
+            unzip -p "$RUNNER_TEMP/patched.apk" "$1" | grep --quiet --text "$2"
+          }
+          found 'classes*.dex' "rustdesk_connection_backup" || { echo "::error::the restore hook is missing"; exit 1; }
+          found 'classes*.dex' "ImeEditReplayer" || { echo "::error::the IME helper is missing"; exit 1; }
+          found "AndroidManifest.xml" "BackupLauncher" || { echo "::error::the launcher alias is missing"; exit 1; }
 
       - name: Upload the patch bundle
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
