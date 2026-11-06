@@ -3,6 +3,22 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_hbb/models/input_modifier_utils.dart';
 
 void main() {
+  test('ATOK commit is recognized even when the composed text is unchanged', () {
+    const text = '111おはよう';
+    const composing = TextEditingValue(
+      text: text,
+      composing: TextRange(start: 3, end: 7),
+    );
+    expect(hasActiveSoftKeyboardComposition(composing), isTrue);
+    expect(
+      hasActiveSoftKeyboardComposition(composing.copyWith(composing: TextRange.empty)),
+      isFalse,
+    );
+    final delta = softKeyboardTextDelta('111', text);
+    expect(delta.deleteCount, 0);
+    expect(delta.insertText, 'おはよう');
+  });
+
   group('softKeyboardTextDelta', () {
     test('replaces same-length Android IME composing text', () {
       final delta = softKeyboardTextDelta('ohayo', 'おはよう');

@@ -1448,6 +1448,27 @@ pub fn main_set_peer_option_sync(id: String, key: String, value: String) -> Sync
 }
 
 pub fn main_set_peer_alias(id: String, alias: String) {
+    #[cfg(target_os = "android")]
+    if !alias.is_empty() {
+        let mut peer = PeerConfig::load(&id);
+        if peer.info.platform.is_empty() {
+            if let Some(discovered) = config::LanPeers::load()
+                .peers
+                .into_iter()
+                .find(|discovered| discovered.id == id && !discovered.platform.is_empty())
+            {
+                // The favorites loader discards peer files with no platform.
+                peer.info = PeerInfoSerde {
+                    username: discovered.username,
+                    hostname: discovered.hostname,
+                    platform: discovered.platform,
+                };
+                peer.options.insert("alias".to_owned(), alias);
+                peer.store(&id);
+                return;
+            }
+        }
+    }
     set_peer_option(id, "alias".to_owned(), alias)
 }
 

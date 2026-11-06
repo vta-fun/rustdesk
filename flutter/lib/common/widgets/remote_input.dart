@@ -17,12 +17,14 @@ class RawKeyFocusScope extends StatelessWidget {
   final FocusNode? focusNode;
   final ValueChanged<bool>? onFocusChange;
   final InputModel inputModel;
+  final KeyEventResult Function(KeyEvent)? onKeyEvent;
   final Widget child;
 
   RawKeyFocusScope({
     this.focusNode,
     this.onFocusChange,
     required this.inputModel,
+    this.onKeyEvent,
     required this.child,
   });
 
@@ -46,7 +48,7 @@ class RawKeyFocusScope extends StatelessWidget {
             onKeyEvent: useRawKeyEvents
                 ? null
                 : (FocusNode node, KeyEvent event) =>
-                    inputModel.handleKeyEvent(event),
+                    (onKeyEvent ?? inputModel.handleKeyEvent)(event),
             child: child));
   }
 }

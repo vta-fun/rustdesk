@@ -8,6 +8,9 @@ enum TerminalInputSource {
   paste,
 }
 
+bool hasActiveSoftKeyboardComposition(TextEditingValue value) =>
+    value.isComposingRangeValid && !value.composing.isCollapsed;
+
 /// Describes how to mirror a hidden soft-keyboard text buffer to the peer.
 class SoftKeyboardTextDelta {
   const SoftKeyboardTextDelta({

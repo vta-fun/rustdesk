@@ -111,6 +111,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
 
   final TextEditingController _textController =
       TextEditingController(text: initText);
+  Future<void> _pendingAndroidTextInput = Future.value();
 
   _RemotePageState(String id) {
     initSharedStates(id);
@@ -121,6 +122,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    if (isAndroid) _textController.addListener(_handleAndroidTextEditing);
     gFFI.ffiModel.updateEventListener(sessionId, widget.id);
     gFFI.start(
       widget.id,
@@ -184,6 +186,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
 
   @override
   Future<void> dispose() async {
+    if (isAndroid) _textController.removeListener(_handleAndroidTextEditing);
     HardwareKeyboard.instance.removeHandler(_handleLocalKeyEvent);
     WidgetsBinding.instance.removeObserver(this);
     // Close the session up-front. `gFFI.close()` below only calls `sessionClose`
@@ -368,6 +371,15 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
     }
   }
 
+  void _handleAndroidTextEditing() {
+    final edit = _textController.value;
+    // The composing range can collapse without changing the text, so watch
+    // the editing value rather than TextField.onChanged on Android.
+    if (_showEdit && !hasActiveSoftKeyboardComposition(edit)) {
+      handleSoftKeyboardInput(edit.text);
+    }
+  }
+
   void _handleNonIOSSoftKeyboardInput(String newValue) {
     var oldValue = _value;
     _value = newValue;
@@ -379,12 +391,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
       oldValue = '';
     }
     final delta = softKeyboardTextDelta(oldValue, newValue);
-    for (var i = 0; i < delta.deleteCount; i++) {
-      inputModel.inputKey('VK_BACK');
-    }
-    if (delta.insertText.isEmpty) {
-      return;
-    }
+    if (delta.deleteCount == 0 && delta.insertText.isEmpty) return;
 
     final shouldResetAutoPair = oldValue.isNotEmpty &&
         delta.deleteCount == 0 &&
@@ -400,28 +407,36 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
           '【】',
         }.contains(delta.insertText);
 
-    _inputSoftKeyboardText(delta.insertText);
+    final hasShortcutModifier =
+        inputModel.ctrl || inputModel.alt || inputModel.command;
+    _pendingAndroidTextInput = _pendingAndroidTextInput.then((_) async {
+      if (!mounted || !inputModel.keyboardInputAllowed) return;
+      for (var i = 0; i < delta.deleteCount; i++) {
+        await inputModel.inputKey('VK_BACK');
+      }
+      await _inputSoftKeyboardText(delta.insertText, hasShortcutModifier);
+    }).catchError((Object error) {
+      debugPrint('Could not send Android keyboard input: $error');
+    });
     if (shouldResetAutoPair) {
       // Reset the hidden buffer after IMEs insert both sides of an auto-pair.
       _openKeyboardUnlocked();
     }
   }
 
-  void _inputSoftKeyboardText(String text) {
+  Future<void> _inputSoftKeyboardText(String text, bool hasShortcutModifier) async {
     final parts = text.split('\n');
     for (var i = 0; i < parts.length; i++) {
       final part = parts[i];
       if (part.isNotEmpty) {
-        final hasShortcutModifier =
-            inputModel.ctrl || inputModel.alt || inputModel.command;
         if (hasShortcutModifier && part.characters.length == 1) {
-          inputChar(part);
+          await inputChar(part);
         } else {
-          bind.sessionInputString(sessionId: sessionId, value: part);
+          await bind.sessionInputString(sessionId: sessionId, value: part);
         }
       }
       if (i < parts.length - 1) {
-        inputModel.inputKey('VK_RETURN');
+        await inputModel.inputKey('VK_RETURN');
       }
     }
   }
@@ -438,7 +453,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
     }
   }
 
-  void inputChar(String char) {
+  Future<void> inputChar(String char) async {
     if (!inputModel.keyboardInputAllowed) {
       return;
     }
@@ -447,7 +462,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
     } else if (char == ' ') {
       char = 'VK_SPACE';
     }
-    inputModel.inputKey(char);
+    await inputModel.inputKey(char);
   }
 
   void openKeyboard() {
@@ -608,6 +623,15 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
           ? RawKeyFocusScope(
               focusNode: _physicalFocusNode,
               inputModel: inputModel,
+              onKeyEvent: isAndroid
+                  ? (event) {
+                      if (_mobileFocusNode.hasPrimaryFocus &&
+                          hasActiveSoftKeyboardComposition(_textController.value)) {
+                        return KeyEventResult.ignored;
+                      }
+                      return inputModel.handleKeyEvent(event);
+                    }
+                  : null,
               child: child)
           : child,
     );
@@ -763,7 +787,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
                       //      2. The button will trigger `onKeyEvent` if the text field is empty.
                       // ko/zh/ja input method: the button will trigger `onKeyEvent`
                       //                     and the event will not popup if `KeyEventResult.handled` is returned.
-                      onChanged: handleSoftKeyboardInput,
+                      onChanged: isAndroid ? null : handleSoftKeyboardInput,
                     ).workaroundFreezeLinuxMint(),
             ),
           ];
