@@ -1,10 +1,10 @@
 # RustDesk 1.5.1 用 Morphe パッチ
 
-Android のキーボードモード選択と日本語 IME の変換中テキスト反映を、RustDesk 1.5.1 の公式 AArch64 APK に適用します。Morphe が APK 内の Flutter アプリと Rust ライブラリを差し替えます。公式 ARM64 APK と一致するネイティブライブラリを検証してから適用するため、Universal APK や別バージョンは対象外です。
+RustDesk 1.5.1 の公式 AArch64 APK 用の Morphe パッチです。キーボード修正は Android IME で確定した文字を接続先へ送信します。バックアップを有効にすると、設定から接続データを保存・復元できます。LAN で見つけた接続先のお気に入り名の保存修正は、どちらのパッチにも含まれます。
 
 - [公式 RustDesk 1.5.1 AArch64 APK](https://github.com/rustdesk/rustdesk/releases/download/1.5.1/rustdesk-1.5.1-aarch64-signed.apk)
-- [パッチ適用済み RustDesk と Morphe バンドルのソース](https://github.com/vta-fun/rustdesk/tree/codex/morphe-backup-settings)
-- [設定メニューを含む ARM64 素材のビルド](https://github.com/vta-fun/rustdesk/actions/runs/42132035880)
+- [パッチ適用済み RustDesk と Morphe バンドルのソース](https://github.com/vta-fun/rustdesk/tree/codex/morphe-ime-favorites)
+- [ARM64 パッチ素材のビルド](https://github.com/vta-fun/rustdesk/actions/runs/42135503457)
 
 ## Morphe Manager で適用
 
@@ -24,7 +24,7 @@ Morphe のパッチ一覧で `Settings backup and restore` を選択して適用
 
 Python 3.11 以上と JDK 21 以上を使用します。下記のコマンドはこのディレクトリで実行します。
 
-1. 公式 1.5.1 のソースに `rustdesk-1.5.1.patch` と `rustdesk-backup-settings.patch` を `git apply` で適用します。上記のブランチには適用済みです。`payload-build.yml` で Rust ライブラリをビルドし、`settings-payload-build.yml` で設定メニューを含む Flutter APK を 2 種類ビルドします。再ビルドする場合は、後者で参照するブリッジと Rust ライブラリの Actions 実行 ID を用意したものに合わせます。
+1. 上記の修正済み RustDesk ブランチをチェックアウトし、`fixes-payload-build.yml` をその `.github/workflows/morphe-fixes.yml` に配置します。Flutter と Rust を 2 種類ビルドします。ブリッジのアーティファクトを再生成した場合は、ワークフローの参照先を更新します。
 2. 公式 APK と `keyboard-and-backup`、`backup` のアーティファクトに含まれる APK から素材を生成します。例では展開後の APK を `keyboard-and-backup.apk` と `backup.apk` にリネームしています。
 
    ```powershell
@@ -32,10 +32,10 @@ Python 3.11 以上と JDK 21 以上を使用します。下記のコマンドは
    .\gradlew.bat :patches:buildAndroid
    ```
 
-3. Morphe Desktop で `patches/build/libs/patches-1.1.0.mpp` を公式 APK に適用し、生成 APK の差し替え内容を検証します。以下はキーボードパッチ単体の検証例です。
+3. Morphe Desktop で `patches/build/libs/patches-1.1.1.mpp` を公式 APK に適用し、生成 APK の差し替え内容を検証します。以下はキーボードパッチ単体の検証例です。
 
    ```powershell
-   java -jar .\morphe-desktop-2.0.0-all.jar patch --exclusive -p .\patches\build\libs\patches-1.1.0.mpp -e 'Android keyboard and Japanese IME' .\rustdesk-1.5.1-aarch64-signed.apk --out .\rustdesk-patched.apk
+   java -jar .\morphe-desktop-2.0.0-all.jar patch --exclusive -p .\patches\build\libs\patches-1.1.1.mpp -e 'Android keyboard and Japanese IME' .\rustdesk-1.5.1-aarch64-signed.apk --out .\rustdesk-patched.apk
    python .\prepare_payload.py .\rustdesk-1.5.1-aarch64-signed.apk .\keyboard-and-backup.apk --patched .\rustdesk-patched.apk
    ```
 
@@ -45,10 +45,10 @@ Python 3.11 以上と JDK 21 以上を使用します。下記のコマンドは
 
 ```powershell
 .\deploy-r2.ps1 `
-  -BundlePath .\patches\build\libs\patches-1.1.0.mpp `
+  -BundlePath .\patches\build\libs\patches-1.1.1.mpp `
   -Bucket rustdesk-morphe-patches `
   -PublicBaseUrl https://pub-c66c63f24a8f448da23039e3ba85c92e.r2.dev `
-  -SourceUrl https://github.com/vta-fun/rustdesk/tree/codex/morphe-backup-settings
+  -SourceUrl https://github.com/vta-fun/rustdesk/tree/codex/morphe-ime-favorites
 ```
 
 `-StageDirectory .\dist` を指定すると、ローカルに配布ファイルだけを生成できます。公開後にバンドルの中身を変更する場合は `patches/build.gradle.kts` のバンドルバージョンも上げてください。

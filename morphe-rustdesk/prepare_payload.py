@@ -13,6 +13,7 @@ STOCK_SHA256 = "cfc44193ef96dd601d25c9a29f1aa5385effdbaae33d2abbb1d88495797f6b84
 LIB_DIR = "lib/arm64-v8a/"
 REPLACEMENTS = ("libapp.so", "librustdesk.so")
 BACKUP_APP = "libapp-backup.so"
+BACKUP_RUST = "librustdesk-backup.so"
 FLUTTER_ENGINE = "libflutter.so"
 CXX_RUNTIME = "libc++_shared.so"
 PAYLOAD_DIR = (
@@ -140,6 +141,10 @@ def prepare(stock_path, rebuilt_path, backup_path, patched_path):
             if backup_app in (original["libapp.so"], replacement["libapp.so"]):
                 raise ValueError("The backup-only Flutter library must be a separate build")
             replacement[BACKUP_APP] = backup_app
+            backup_rust = read_arm64_elf(backup, "librustdesk.so")
+            if backup_rust in (original["librustdesk.so"], replacement["librustdesk.so"]):
+                raise ValueError("The backup-only Rust library must be a separate build")
+            replacement[BACKUP_RUST] = backup_rust
 
     original[FLUTTER_ENGINE] = engine
     checksums = "".join(

@@ -18,6 +18,7 @@ private const val ABI = "arm64-v8a"
 private const val LIBRARY_PATH = "lib/$ABI/"
 private const val RESOURCE_PATH = "/rustdesk/$APP_VERSION/$ABI/"
 private const val BACKUP_APP_LIBRARY = "libapp-backup.so"
+private const val BACKUP_RUST_LIBRARY = "librustdesk-backup.so"
 private val patchedLibraries = listOf("libapp.so", "librustdesk.so")
 private val expectedLibraries = patchedLibraries + listOf("libflutter.so", "libc++_shared.so")
 
@@ -29,7 +30,7 @@ private object Payload {
 @Suppress("unused")
 val androidKeyboardPatch = rawResourcePatch(
     name = "Android keyboard and Japanese IME",
-    description = "Adds the Android keyboard mode selector and mirrors Japanese IME composition to the remote session. Requires the official ARM64 RustDesk $APP_VERSION APK.",
+    description = "Adds the Android keyboard mode selector and sends committed Japanese IME text to the remote session. Requires the official ARM64 RustDesk $APP_VERSION APK.",
 ) {
     compatibleWith(
         Compatibility(
@@ -42,7 +43,7 @@ val androidKeyboardPatch = rawResourcePatch(
 
     execute {
         val hashes = Properties().apply { Payload.open("sha256.properties").use(::load) }
-        val originals = checkedLibraries(hashes, listOf("patched.$BACKUP_APP_LIBRARY"))
+        val originals = checkedLibraries(hashes, mapOf("libapp.so" to BACKUP_APP_LIBRARY, "librustdesk.so" to BACKUP_RUST_LIBRARY))
         replaceLibraries(hashes, originals, patchedLibraries.associateWith { it })
     }
 }
@@ -50,18 +51,17 @@ val androidKeyboardPatch = rawResourcePatch(
 internal val backupFlutterPatch = rawResourcePatch {
     execute {
         val hashes = Properties().apply { Payload.open("sha256.properties").use(::load) }
-        val originals = checkedLibraries(hashes, listOf("patched.libapp.so"), allowPatchedRust = true)
-        // When the keyboard patch ran first, its Flutter library already contains the settings entry.
+        val originals = checkedLibraries(hashes, patchedLibraries.associateWith { it })
+        // The keyboard variant already contains the backup settings and favorites fix.
         if (originals.getValue("libapp.so").inputStream().use(::sha256) != hashes.getProperty("patched.libapp.so")) {
-            replaceLibraries(hashes, originals, mapOf("libapp.so" to BACKUP_APP_LIBRARY))
+            replaceLibraries(hashes, originals, mapOf("libapp.so" to BACKUP_APP_LIBRARY, "librustdesk.so" to BACKUP_RUST_LIBRARY))
         }
     }
 }
 
 private fun ResourcePatchContext.checkedLibraries(
     hashes: Properties,
-    extraAppHashes: List<String>,
-    allowPatchedRust: Boolean = false,
+    alternateLibraries: Map<String, String>,
 ): Map<String, File> {
     val libraries = listApkEntries("lib/").filterNot { it.endsWith('/') }
     if (libraries.any { !it.startsWith(LIBRARY_PATH) }) {
@@ -71,13 +71,9 @@ private fun ResourcePatchContext.checkedLibraries(
         val path = LIBRARY_PATH + name
         if (path !in libraries) throw PatchException("Missing $path in the RustDesk APK.")
         get(path).also { library ->
-            val accepted = listOf("original.$name") + when {
-                name == "libapp.so" -> extraAppHashes
-                name == "librustdesk.so" && allowPatchedRust -> listOf("patched.$name")
-                else -> emptyList()
-            }
             val digest = library.inputStream().use(::sha256)
-            if (accepted.none { hashes.getProperty(it) == digest }) {
+            val alternate = alternateLibraries[name]?.let { hashes.getProperty("patched.$it") }
+            if (digest != hashes.getProperty("original.$name") && digest != alternate) {
                 throw PatchException("Unexpected $path. Use the original official ARM64 RustDesk $APP_VERSION APK.")
             }
         }

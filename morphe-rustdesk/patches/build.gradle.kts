@@ -8,7 +8,7 @@ plugins {
     kotlin("jvm") version "2.4.21"
 }
 
-version = "1.1.0"
+version = "1.1.1"
 
 repositories {
     mavenCentral()
@@ -125,7 +125,7 @@ tasks.jar {
     }
     doFirst {
         val libraries = payload.get().dir("rustdesk/1.5.1/arm64-v8a")
-        for (name in listOf("sha256.properties", "libapp.so", "libapp-backup.so", "librustdesk.so")) {
+        for (name in listOf("sha256.properties", "libapp.so", "libapp-backup.so", "librustdesk.so", "librustdesk-backup.so")) {
             check(libraries.file(name).asFile.isFile) { "Missing $name. Run prepare_payload.py before building the patch bundle." }
         }
     }
