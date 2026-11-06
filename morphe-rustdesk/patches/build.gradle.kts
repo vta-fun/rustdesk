@@ -8,7 +8,7 @@ plugins {
     kotlin("jvm") version "2.4.21"
 }
 
-version = "1.1.1"
+version = "1.2.0"
 
 repositories {
     mavenCentral()
@@ -51,26 +51,31 @@ val extractAndroidJar = tasks.register<Sync>("extractAndroidJar") {
 }
 
 val androidJar = androidSdk.map { it.file("android-36/android.jar") }
-val backupClasses = layout.buildDirectory.dir("classes/backup")
-val compileBackupJava = tasks.register<JavaCompile>("compileBackupJava") {
+val extensionClasses = layout.buildDirectory.dir("classes/extension")
+val compileExtensionJava = tasks.register<JavaCompile>("compileExtensionJava") {
     dependsOn(extractAndroidJar)
-    source(rootProject.fileTree("backup/src/main/java") { include("**/*.java") })
+    // Both trees are merged into one dex: the bytecode patches reference them from the same
+    // extension archive.
+    source(
+        rootProject.fileTree("backup/src/main/java") { include("**/*.java") },
+        rootProject.fileTree("ime/src/main/java") { include("**/*.java") },
+    )
     classpath = files(androidJar)
-    destinationDirectory.set(backupClasses)
+    destinationDirectory.set(extensionClasses)
     options.release.set(8)
     options.encoding = "UTF-8"
 }
 
-val backupDex = layout.buildDirectory.file("dex/backup.zip")
-val compileBackupDex = tasks.register<JavaExec>("compileBackupDex") {
-    dependsOn(compileBackupJava)
+val extensionDex = layout.buildDirectory.file("dex/extension.zip")
+val compileExtensionDex = tasks.register<JavaExec>("compileExtensionDex") {
+    dependsOn(compileExtensionJava)
     classpath = files(d8Jar)
     mainClass.set("com.android.tools.r8.D8")
-    val classes = fileTree(backupClasses) { include("**/*.class") }
+    val classes = fileTree(extensionClasses) { include("**/*.class") }
     inputs.files(classes, androidJar)
-    outputs.file(backupDex)
+    outputs.file(extensionDex)
     doFirst {
-        val output = backupDex.get().asFile
+        val output = extensionDex.get().asFile
         output.parentFile.mkdirs()
         args(
             "--release", "--min-api", "22",
@@ -84,11 +89,6 @@ val compileBackupDex = tasks.register<JavaExec>("compileBackupDex") {
 dependencies {
     // The runtime already provides the Patcher API. Compile against the official CLI release to build without a GitHub Packages token.
     compileOnly(files(desktopJar))
-}
-
-val payload = layout.buildDirectory.dir("generated/rustdeskPayload")
-sourceSets.main {
-    resources.srcDir(payload)
 }
 
 val dexFile = layout.buildDirectory.file("dex/classes.zip")
@@ -113,26 +113,20 @@ val compilePatchDex = tasks.register<JavaExec>("compilePatchDex") {
 }
 
 tasks.jar {
-    dependsOn(compilePatchDex, compileBackupDex)
+    dependsOn(compilePatchDex, compileExtensionDex)
     archiveExtension.set("mpp")
     isPreserveFileTimestamps = false
     isReproducibleFileOrder = true
     from(dexFile.map { zipTree(it) }) { include("classes.dex") }
-    from(backupDex.map { zipTree(it) }) {
+    from(extensionDex.map { zipTree(it) }) {
         include("classes.dex")
         into("extensions")
-        rename { "rustdesk-backup.mpe" }
-    }
-    doFirst {
-        val libraries = payload.get().dir("rustdesk/1.5.1/arm64-v8a")
-        for (name in listOf("sha256.properties", "libapp.so", "libapp-backup.so", "librustdesk.so", "librustdesk-backup.so")) {
-            check(libraries.file(name).asFile.isFile) { "Missing $name. Run prepare_payload.py before building the patch bundle." }
-        }
+        rename { "rustdesk-extension.mpe" }
     }
     manifest {
         attributes(
             "Name" to "RustDesk Patches",
-            "Description" to "Android keyboard, Japanese IME and settings backup patches for RustDesk",
+            "Description" to "Japanese soft keyboard and settings backup patches for RustDesk",
             "Version" to project.version,
             "Patcher-Version" to "2.2.0",
             "License" to "AGPL-3.0-only",

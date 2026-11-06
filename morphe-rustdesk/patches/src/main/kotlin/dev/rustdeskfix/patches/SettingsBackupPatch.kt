@@ -10,10 +10,12 @@ import app.morphe.patcher.patch.bytecodePatch
 import app.morphe.patcher.patch.resourcePatch
 import app.morphe.patcher.util.smali.ExternalLabel
 import com.android.tools.smali.dexlib2.iface.instruction.ReferenceInstruction
+import org.w3c.dom.Document
 import org.w3c.dom.Element
 
 private const val ANDROID_NS = "http://schemas.android.com/apk/res/android"
 private const val BACKUP_ACTIVITY = "dev.rustdeskfix.backup.BackupActivity"
+private const val BACKUP_ALIAS = "dev.rustdeskfix.backup.BackupLauncher"
 private const val MAIN_APPLICATION = "Lcom/carriez/flutter_hbb/MainApplication;"
 private const val MAIN_ACTIVITY = "Lcom/carriez/flutter_hbb/MainActivity;"
 private const val ANDROID_ON_CREATE = "Landroid/app/Application;->onCreate()V"
@@ -21,8 +23,6 @@ private const val RUSTDESK_ON_APP_START = "Lffi/FFI;->onAppStart(Landroid/conten
 private const val APPLY_PENDING = "Ldev/rustdeskfix/backup/BackupStore;->applyPending(Landroid/content/Context;)V"
 
 private val backupStartupPatch = bytecodePatch {
-    extendWith("extensions/rustdesk-backup.mpe")
-
     execute {
         val onCreate = mutableClassDefBy(MAIN_APPLICATION).methods.singleOrNull { method ->
             method.name == "onCreate" && method.parameterTypes.isEmpty() && method.returnType == "V"
@@ -77,7 +77,8 @@ private val backupStartupPatch = bytecodePatch {
 @Suppress("unused")
 val settingsBackupPatch = resourcePatch(
     name = "Settings backup and restore",
-    description = "Adds Backup and restore to RustDesk Settings, with the Android file picker and restore at app startup.",
+    description = "Adds Backup and restore to RustDesk: connection history, favorites and server " +
+        "settings are written to a file through the Android file picker and restored at app startup.",
     default = false,
 ) {
     compatibleWith(
@@ -88,7 +89,7 @@ val settingsBackupPatch = resourcePatch(
             targets = listOf(AppTarget(version = "1.5.1")),
         ),
     )
-    dependsOn(backupFlutterPatch, backupStartupPatch)
+    dependsOn(rustdeskExtension, backupStartupPatch)
 
     execute {
         document("AndroidManifest.xml").use { manifest ->
@@ -101,14 +102,41 @@ val settingsBackupPatch = resourcePatch(
                     throw PatchException("The RustDesk backup activity is already installed. Patch an original RustDesk APK.")
                 }
             }
-            val activity = manifest.createElement("activity").apply {
-                setAttributeNS(ANDROID_NS, "android:name", BACKUP_ACTIVITY)
-                setAttributeNS(ANDROID_NS, "android:exported", "false")
-                setAttributeNS(ANDROID_NS, "android:label", "RustDesk Backup")
-                setAttributeNS(ANDROID_NS, "android:launchMode", "singleTop")
-                setAttributeNS(ANDROID_NS, "android:theme", "@android:style/Theme.Material.Light.NoActionBar")
-            }
-            application.appendChild(activity)
+            application.appendChild(manifest.activity())
+            application.appendChild(manifest.launcherAlias())
         }
     }
 }
+
+/**
+ * The settings page that calls `rustdesk_connection_backup` is Dart compiled into libapp.so, so a
+ * launcher alias is the entry point that does not require replacing any Rust or Flutter library.
+ */
+private fun Document.launcherAlias(): Element {
+    val alias = createElement("activity-alias")
+    alias.setAttributeNS(ANDROID_NS, "android:name", BACKUP_ALIAS)
+    alias.setAttributeNS(ANDROID_NS, "android:targetActivity", BACKUP_ACTIVITY)
+    alias.setAttributeNS(ANDROID_NS, "android:exported", "true")
+    alias.setAttributeNS(ANDROID_NS, "android:label", "RustDesk Backup")
+    alias.setAttributeNS(ANDROID_NS, "android:launchMode", "singleTop")
+    alias.appendChild(
+        createElement("intent-filter").apply {
+            appendChild(element("action", "android:name", "android.intent.action.MAIN"))
+            appendChild(element("category", "android:name", "android.intent.category.LAUNCHER"))
+        },
+    )
+    return alias
+}
+
+private fun Document.activity(): Element {
+    val activity = createElement("activity")
+    activity.setAttributeNS(ANDROID_NS, "android:name", BACKUP_ACTIVITY)
+    activity.setAttributeNS(ANDROID_NS, "android:exported", "false")
+    activity.setAttributeNS(ANDROID_NS, "android:label", "RustDesk Backup")
+    activity.setAttributeNS(ANDROID_NS, "android:launchMode", "singleTop")
+    activity.setAttributeNS(ANDROID_NS, "android:theme", "@android:style/Theme.Material.Light.NoActionBar")
+    return activity
+}
+
+private fun Document.element(name: String, attribute: String, value: String): Element =
+    createElement(name).apply { setAttributeNS(ANDROID_NS, attribute, value) }

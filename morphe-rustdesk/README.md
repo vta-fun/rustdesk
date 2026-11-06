@@ -1,43 +1,65 @@
-# RustDesk 1.5.1 用 Morphe パッチ
+# RustDesk 用 Morphe パッチ
 
-RustDesk 1.5.1 の公式 AArch64 APK 用の Morphe パッチです。キーボード修正は Android IME で確定した文字を接続先へ送信します。バックアップを有効にすると、設定から接続データを保存・復元できます。LAN で見つけた接続先のお気に入り名の保存修正は、どちらのパッチにも含まれます。
+RustDesk 本体の `libapp.so` / `librustdesk.so` を差し替えず、dex と AndroidManifest だけを書き換える軽量パッチです。公式の RustDesk 1.5.1 AArch64 APK にそのまま適用でき、パッチ一式は 50 KB 程度です。
 
 - [公式 RustDesk 1.5.1 AArch64 APK](https://github.com/rustdesk/rustdesk/releases/download/1.5.1/rustdesk-1.5.1-aarch64-signed.apk)
-- [パッチ適用済み RustDesk と Morphe バンドルのソース](https://github.com/vta-fun/rustdesk/tree/codex/morphe-ime-favorites)
-- [ARM64 パッチ素材のビルド](https://github.com/vta-fun/rustdesk/actions/runs/42135503457)
+- [パッチのソース](https://github.com/vta-fun/rustdesk/tree/codex/morphe-ime-favorites)
+
+## パッチ一覧
+
+| パッチ | 既定 | 内容 |
+|---|---|---|
+| `Fix Japanese soft keyboard input` | 有効 | IME が隠し入力欄を書き換えたときの削除を 1 文字ずつ接続先へ送ります。濁点・小書き・ローマ字変換・ATOK の確定入力が崩れなくなります。 |
+| `Settings backup and restore` | 無効 | 接続履歴・お気に入り・ID/リレー/API サーバー設定・公開鍵を JSON に保存し、再起動時に取り込みます。 |
+
+どちらもネイティブライブラリを置き換えないため、公式 APK の署名済みバイナリはそのまま残ります。
 
 ## Morphe Manager で適用
 
-1. Sources で Remote ソースを追加し、`patches-bundle.json` の公開 URL を入力します。ローカルの `.mpp` を Sources に取り込むこともできます。 [Morphe ソース URL](https://pub-c66c63f24a8f448da23039e3ba85c92e.r2.dev/patches-bundle.json)
-2. 公式 `rustdesk-1.5.1-aarch64-signed.apk` を選択し、`Android keyboard and Japanese IME` を適用します。
-3. 従来の改造 APK に上書きする場合は、適用前に Morphe の署名鍵設定に従来と同じ鍵を読み込んでください。公式版に使われている署名鍵は別です。 [Morphe の署名鍵設定](https://github.com/MorpheApp/morphe-manager/blob/main/docs/backup-and-keystore.md)
+1. Sources で Remote ソースを追加し、`patches-bundle.json` の公開 URL を入力します。ローカルの `.mpp` を Sources に取り込むこともできます。
+   [Morphe ソース URL](https://pub-c66c63f24a8f448da23039e3ba85c92e.r2.dev/patches-bundle.json)
+2. 公式 `rustdesk-1.5.1-aarch64-signed.apk` を選び、必要なパッチを有効にします。
+3. 従来の改造 APK に上書きする場合は、適用前に Morphe の署名鍵設定へ従来と同じ鍵を読み込んでください。公式版の署名鍵は別です。
+   [Morphe の署名鍵設定](https://github.com/MorpheApp/morphe-manager/blob/main/docs/backup-and-keystore.md)
 
-### 接続先のバックアップと復元
+## バックアップと復元
 
-Morphe のパッチ一覧で `Settings backup and restore` を選択して適用します。インストールしたら、RustDesk 本体の **設定 → バックアップと復元** を開きます。保存先や復元元は Android のファイル選択画面で指定します。Shizuku は不要です。
+パッチ適用後に追加される **RustDesk Backup** のアイコン（ランチャー）から開きます。保存先と復元元は Android のファイル選択画面で指定し、Shizuku は不要です。
 
-- バックアップ対象は接続先、最後に使った接続 ID、お気に入り、ID・リレー・API サーバーの設定とサーバー公開鍵です。
+RustDesk の設定画面に項目を出すには Dart 側（`libapp.so`）の差し替えが要るため、軽量版では設定画面ではなくランチャーから開く形にしています。`rustdesk_connection_backup` の設定チャンネルフックは残してあるので、Dart を差し替えた APK では設定画面からも開けます。
+
+- バックアップ対象: 接続先、最後に使った接続 ID、お気に入り、ID・リレー・API サーバーの設定とサーバー公開鍵。
 - 保存パスワード、ログイントークン、端末の RustDesk ID と秘密鍵は書き出しません。
 - 復元は現在の設定に取り込みます。復元ファイルを選んで確認したら、RustDesk を完全に終了して開き直すと反映されます。
 
-## バンドルをビルド
+## 構成
 
-Python 3.11 以上と JDK 21 以上を使用します。下記のコマンドはこのディレクトリで実行します。
+| パス | 内容 |
+|---|---|
+| `patches/src/main/kotlin/` | パッチ定義。フィンガープリントで難読化された対象メソッドを探し、smali を注入します。 |
+| `backup/src/main/java/` | バックアップ／復元の画面と TOML・JSON の読み書き。 |
+| `ime/src/main/java/` | IME の編集差分を `TextInputPlugin` へ再送するヘルパー。 |
+| `deploy-r2.ps1` | R2 への公開と `patches-bundle.json` の更新。 |
 
-1. 上記の修正済み RustDesk ブランチをチェックアウトし、`fixes-payload-build.yml` をその `.github/workflows/morphe-fixes.yml` に配置します。Flutter と Rust を 2 種類ビルドします。ブリッジのアーティファクトを再生成した場合は、ワークフローの参照先を更新します。
-2. 公式 APK と `keyboard-and-backup`、`backup` のアーティファクトに含まれる APK から素材を生成します。例では展開後の APK を `keyboard-and-backup.apk` と `backup.apk` にリネームしています。
+## ビルド
 
-   ```powershell
-   python .\prepare_payload.py .\rustdesk-1.5.1-aarch64-signed.apk .\keyboard-and-backup.apk --backup-only .\backup.apk
-   .\gradlew.bat :patches:buildAndroid
-   ```
+JDK 17 以上とネットワーク接続が必要です（Morphe CLI・D8・Android platform jar を SHA-256 検証付きで取得します）。
 
-3. Morphe Desktop で `patches/build/libs/patches-1.1.1.mpp` を公式 APK に適用し、生成 APK の差し替え内容を検証します。以下はキーボードパッチ単体の検証例です。
+```powershell
+cd morphe-rustdesk
+.\gradlew.bat :patches:buildAndroid
+# => patches\build\libs\patches-<version>.mpp
+```
 
-   ```powershell
-   java -jar .\morphe-desktop-2.0.0-all.jar patch --exclusive -p .\patches\build\libs\patches-1.1.1.mpp -e 'Android keyboard and Japanese IME' .\rustdesk-1.5.1-aarch64-signed.apk --out .\rustdesk-patched.apk
-   python .\prepare_payload.py .\rustdesk-1.5.1-aarch64-signed.apk .\keyboard-and-backup.apk --patched .\rustdesk-patched.apk
-   ```
+公式 APK への適用確認まで行う場合は JDK 21 が必要です。
+
+```powershell
+java -jar patches\build\tools\morphe-desktop-2.0.0-all.jar patch --unsigned `
+  -p patches\build\libs\patches-1.2.0.mpp `
+  rustdesk-1.5.1-aarch64-signed.apk -o rustdesk-patched.apk
+```
+
+`%LOCALAPPDATA%\Temp` に書き込めない環境では `java.nio.file.AccessDeniedException` で再構築が止まります。`-Djava.io.tmpdir=<書き込み可能なパス>` を JVM に渡してください。
 
 ## Cloudflare R2 に配布
 
@@ -45,12 +67,18 @@ Python 3.11 以上と JDK 21 以上を使用します。下記のコマンドは
 
 ```powershell
 .\deploy-r2.ps1 `
-  -BundlePath .\patches\build\libs\patches-1.1.1.mpp `
+  -BundlePath .\patches\build\libs\patches-1.2.0.mpp `
   -Bucket rustdesk-morphe-patches `
   -PublicBaseUrl https://pub-c66c63f24a8f448da23039e3ba85c92e.r2.dev `
   -SourceUrl https://github.com/vta-fun/rustdesk/tree/codex/morphe-ime-favorites
 ```
 
-`-StageDirectory .\dist` を指定すると、ローカルに配布ファイルだけを生成できます。公開後にバンドルの中身を変更する場合は `patches/build.gradle.kts` のバンドルバージョンも上げてください。
+`-StageDirectory .\dist` を指定すると、ローカルに配布ファイルだけを生成できます。公開後にバンドルの中身を変更する場合は `patches/build.gradle.kts` のバージョンも上げてください。
 
-RustDesk 由来のソースとバイナリは GNU AGPL v3 に従います。 [ライセンス本文](https://github.com/vta-fun/rustdesk/blob/a6a7388bf16705af24b50ad5f6f45bd854f49197/LICENCE)
+## 旧方式（ペイロード差し替え）
+
+`prepare_payload.py`、`rustdesk-1.5.1.patch`、`rustdesk-backup-settings.patch`、`.github/workflows/morphe-*.yml` は、ビルド済み `libapp.so` / `librustdesk.so` を差し替える以前の方式の名残です。現在のバンドルはこれらを必要としません。
+
+## ライセンス
+
+RustDesk 由来のソースとバイナリは GNU AGPL v3 に従います。IME パッチは Mikunyan_346 氏の `patches-1.1.0`（GPLv3）の移植で、元の実装は `app.rustdeskime.patches.ime.JapaneseSoftKeyboardPatch` と `app.rustdeskime.extension.ImeEditReplayer` です。
