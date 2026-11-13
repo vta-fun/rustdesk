@@ -1,4 +1,3 @@
-# trigger-probe
 # Builds the 1.5.3 APK whose Dart snapshot carries the backup entry in Settings.
 # The extracted lib/arm64-v8a/libapp.so becomes the payload of the patch bundle.
 name: RustDesk 1.5.3 payload APK
