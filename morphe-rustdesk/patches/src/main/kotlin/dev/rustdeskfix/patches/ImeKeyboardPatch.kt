@@ -47,7 +47,7 @@ val imeKeyboardPatch = bytecodePatch(
             packageName = "com.carriez.flutter_hbb",
             name = "RustDesk",
             apkFileType = ApkFileType.APK,
-            targets = listOf(AppTarget(version = "1.5.1"), AppTarget(version = null)),
+            targets = listOf(AppTarget(version = "1.5.3"), AppTarget(version = "1.5.1"), AppTarget(version = null)),
         ),
     )
     dependsOn(rustdeskExtension)
