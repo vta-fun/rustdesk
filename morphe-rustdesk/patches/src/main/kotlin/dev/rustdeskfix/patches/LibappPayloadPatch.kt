@@ -6,7 +6,7 @@ import java.io.InputStream
 import java.security.MessageDigest
 import java.util.Properties
 
-private const val APP_VERSION = "1.5.1"
+private const val APP_VERSION = "1.5.3"
 private const val ABI = "arm64-v8a"
 private const val LIBRARY_PATH = "lib/$ABI/"
 private const val RESOURCE_PATH = "/rustdesk/$APP_VERSION/$ABI/"

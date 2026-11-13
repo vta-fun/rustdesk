@@ -8,7 +8,7 @@ plugins {
     kotlin("jvm") version "2.4.21"
 }
 
-version = "1.4.0"
+version = "1.5.0"
 
 repositories {
     mavenCentral()
@@ -120,7 +120,7 @@ val compilePatchDex = tasks.register<JavaExec>("compilePatchDex") {
 tasks.jar {
     dependsOn(compilePatchDex, compileExtensionDex)
     doFirst {
-        val lib = payload.dir("rustdesk/1.5.1/arm64-v8a")
+        val lib = payload.dir("rustdesk/1.5.3/arm64-v8a")
         for (name in listOf("sha256.properties", "libapp.so")) {
             check(lib.file(name).asFile.isFile) { "Missing $name. See the payload section of README.md." }
         }

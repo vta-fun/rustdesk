@@ -126,8 +126,8 @@ val settingsBackupPatch = resourcePatch(
             packageName = "com.carriez.flutter_hbb",
             name = "RustDesk",
             apkFileType = ApkFileType.APK,
-            // The payload is a libapp.so built from 1.5.1, so the patch is only offered for it.
-            targets = listOf(AppTarget(version = "1.5.1")),
+            // The payload is a libapp.so built from 1.5.3, so the patch is only offered for it.
+            targets = listOf(AppTarget(version = "1.5.3")),
         ),
     )
     dependsOn(rustdeskExtension, backupStartupPatch, libappPayloadPatch)
