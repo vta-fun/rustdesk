@@ -1,0 +1,9 @@
+name: Probe
+on:
+  push:
+    branches: [codex/morphe-1.5.3]
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo probe
