@@ -161,3 +161,4 @@ private fun Document.activity(): Element {
 
 private fun Document.element(name: String, attribute: String, value: String): Element =
     createElement(name).apply { setAttributeNS(ANDROID_NS, attribute, value) }
+
