@@ -12,6 +12,15 @@ private const val LIBRARY_PATH = "lib/$ABI/"
 private const val RESOURCE_PATH = "/rustdesk/$APP_VERSION/$ABI/"
 private const val LIBAPP = "libapp.so"
 
+/** Official libapp.so digests, so a mismatch can name the version it came from. */
+private val KNOWN_LIBAPP = mapOf(
+    "fc50ade6197915566ec1191ad4102a56400dfcfbed4fcf753ff0f2c7ba7d6b9a" to "1.5.1",
+    "0eeabd4dcb190425534248ecc5dede159505e9d4237c64284b2054db48a4f8f1" to "1.5.3",
+)
+
+private fun describe(digest: String): String =
+    KNOWN_LIBAPP[digest]?.let { "RustDesk $it" } ?: "an unknown build (${digest.take(12)}…)"
+
 private object LibappPayload {
     fun open(name: String): InputStream = javaClass.getResourceAsStream(RESOURCE_PATH + name)
         ?: throw PatchException("Missing RustDesk patch payload: $name")
@@ -27,8 +36,12 @@ internal val libappPayloadPatch = rawResourcePatch {
         val hashes = Properties().apply { LibappPayload.open("sha256.properties").use(::load) }
         val path = LIBRARY_PATH + LIBAPP
         val entry = get(path)
-        if (entry.inputStream().use(::sha256) != hashes.getProperty("original.$LIBAPP")) {
-            throw PatchException("Unexpected $path. Use the original official ARM64 RustDesk $APP_VERSION APK.")
+        val actual = entry.inputStream().use(::sha256)
+        if (actual != hashes.getProperty("original.$LIBAPP")) {
+            throw PatchException(
+                "This bundle targets RustDesk $APP_VERSION, but the APK carries libapp.so from " +
+                    "${describe(actual)}. Use the official RustDesk $APP_VERSION ARM64 APK.",
+            )
         }
 
         val replacement = LibappPayload.open(LIBAPP).use { it.readBytes() }
